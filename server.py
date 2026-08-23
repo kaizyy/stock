@@ -142,6 +142,11 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        path = urlparse(self.path).path
+        if self.command == "GET" and path in ("/", "/index.html") and self.session_expires_at:
+            remaining = max(1, int(self.session_expires_at - time.time()))
+            self.send_header("Refresh", f"{remaining}; url=/logout")
+            self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def cookie_token(self):
@@ -189,7 +194,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
 
     def send_login_page(self, error="", status=200):
         error_html = f'<p class="error">{html.escape(error)}</p>' if error else ""
-        body = LOGIN_PAGE.format(error=error_html).encode("utf-8")
+        body = LOGIN_PAGE.replace("{error}", error_html).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -255,52 +260,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             self.send_json(200, {"expiresAt": self.session_expires_at})
             return
 
-        # De browser verlaat het dashboard automatisch wanneer de harde sessietijd afloopt.
-        remaining = max(1, int(self.session_expires_at - time.time()))
-        self.send_response(200)
-        self.send_header("Refresh", f"{remaining}; url=/logout")
-        # SimpleHTTPRequestHandler.do_GET() kan na een reeds gestuurde status niet gebruikt worden,
-        # daarom versturen we statische bestanden via send_head/copyfile.
-        file_obj = self.send_head_after_status()
-        if file_obj:
-            try:
-                self.copyfile(file_obj, self.wfile)
-            finally:
-                file_obj.close()
-
-    def send_head_after_status(self):
-        # Variant van SimpleHTTPRequestHandler.send_head zonder zelf opnieuw send_response() te doen.
-        path = self.translate_path(self.path)
-        if os.path.isdir(path):
-            parts = urlparse(self.path)
-            if not parts.path.endswith('/'):
-                self.send_header("Location", parts.path + '/')
-                self.end_headers()
-                return None
-            for index in ("index.html", "index.htm"):
-                candidate = os.path.join(path, index)
-                if os.path.isfile(candidate):
-                    path = candidate
-                    break
-            else:
-                self.send_error(403)
-                return None
-        try:
-            file_obj = open(path, 'rb')
-        except OSError:
-            self.send_error(404, "File not found")
-            return None
-        try:
-            fs = os.fstat(file_obj.fileno())
-            ctype = self.guess_type(path)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(fs.st_size))
-            self.send_header("Last-Modified", self.date_time_string(fs.st_mtime))
-            self.end_headers()
-            return file_obj
-        except Exception:
-            file_obj.close()
-            raise
+        super().do_GET()
 
     def do_HEAD(self):
         path = urlparse(self.path).path
