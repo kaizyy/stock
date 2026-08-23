@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Voorraad, inkoop, verkoop, betalingen en leveringen in een rustig overzicht." />
+  <title>Stockroom — Voorraadbeheer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Stockroom startpagina"><span class="brand-mark">S</span><span>stockroom</span></a>
+      <nav aria-label="Hoofdnavigatie">
+        <button class="nav-item active" data-view="overview"><span>⌂</span>Overzicht</button>
+        <button class="nav-item" data-view="inventory"><span>□</span>Voorraad</button>
+        <button class="nav-item" data-view="incoming"><span>↓</span>Inkomend <b id="incomingBadge">0</b></button>
+        <button class="nav-item" data-view="outgoing"><span>↑</span>Uitgaand <b id="outgoingBadge">0</b></button>
+      </nav>
+      <div class="sidebar-note"><span>✓</span><div><strong>Alles lokaal bewaard</strong><small>Je gegevens blijven op dit apparaat.</small></div></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button class="mobile-menu" aria-label="Menu openen">☰</button>
+        <div><p class="eyebrow">Zondag, 23 augustus</p><h1 id="pageTitle">Goedemorgen</h1></div>
+        <div class="top-actions">
+          <button class="button ghost" id="exportBtn">Exporteer</button>
+          <button class="button primary" id="quickAddBtn"><span>＋</span> Nieuwe transactie</button>
+        </div>
+      </header>
+
+      <section id="overview" class="view active-view">
+        <div class="summary-grid">
+          <article class="metric accent"><p>Voorraadwaarde</p><h2 id="inventoryValue">€ 0,00</h2><span id="inventoryUnits">0 items op voorraad</span></article>
+          <article class="metric"><div class="metric-icon green">↗</div><p>Omzet</p><h2 id="revenueValue">€ 0,00</h2><span>Uit geleverde verkopen</span></article>
+          <article class="metric"><div class="metric-icon amber">◷</div><p>Openstaand</p><h2 id="outstandingValue">€ 0,00</h2><span id="outstandingCount">0 betalingen te ontvangen</span></article>
+          <article class="metric"><div class="metric-icon blue">▣</div><p>Verwacht</p><h2 id="expectedCount">0</h2><span>Inkomende leveringen</span></article>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="panel stock-panel"><div class="panel-head"><div><p class="eyebrow">Live overzicht</p><h3>Voorraad</h3></div><button class="text-button" data-go="inventory">Bekijk alles →</button></div><div id="stockList" class="stock-list"></div></article>
+          <article class="panel activity-panel"><div class="panel-head"><div><p class="eyebrow">Recente updates</p><h3>Activiteit</h3></div></div><div id="activityList" class="activity-list"></div></article>
+        </div>
+
+        <div class="status-grid">
+          <article class="status-card warning"><div><span class="status-symbol">€</span><div><p>Nog niet betaald</p><strong id="unpaidSummary">Geen openstaande betalingen</strong></div></div><button data-go="outgoing">Bekijken →</button></article>
+          <article class="status-card info"><div><span class="status-symbol">⌁</span><div><p>Nog niet geleverd</p><strong id="undeliveredSummary">Geen leveringen onderweg</strong></div></div><button data-go="incoming">Bekijken →</button></article>
+        </div>
+      </section>
+
+      <section id="inventory" class="view"><div class="section-head"><div><p class="eyebrow">Actuele aantallen</p><h2>Voorraad</h2></div><button class="button primary" data-add="item">＋ Nieuw item</button></div><div class="table-card"><table><thead><tr><th>Item</th><th>SKU</th><th>Voorraad</th><th>Inkoopprijs</th><th>Verkoopprijs</th><th>Waarde</th></tr></thead><tbody id="inventoryTable"></tbody></table></div></section>
+      <section id="incoming" class="view"><div class="section-head"><div><p class="eyebrow">Bestellingen bij leveranciers</p><h2>Inkomend</h2></div><button class="button primary" data-add="incoming">＋ Inkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet geleverd</button><button class="filter" data-filter="done">Geleverd</button></div><div id="incomingCards" class="transaction-list"></div></section>
+      <section id="outgoing" class="view"><div class="section-head"><div><p class="eyebrow">Verkopen aan klanten</p><h2>Uitgaand</h2></div><button class="button primary" data-add="outgoing">＋ Verkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet betaald</button><button class="filter" data-filter="done">Betaald</button></div><div id="outgoingCards" class="transaction-list"></div></section>
+    </main>
+  </div>
+
+  <dialog id="transactionDialog">
+    <form method="dialog" id="transactionForm">
+      <div class="dialog-head"><div><p class="eyebrow">Nieuwe registratie</p><h2 id="dialogTitle">Transactie toevoegen</h2></div><button class="icon-button" value="cancel" aria-label="Sluiten">×</button></div>
+      <div class="type-switch"><button type="button" class="active" data-type="incoming">↓ Inkomend</button><button type="button" data-type="outgoing">↑ Uitgaand</button><button type="button" data-type="item">□ Nieuw item</button></div>
+      <input type="hidden" id="transactionType" value="incoming" />
+      <label>Item<select id="itemSelect" required></select></label>
+      <div id="newItemFields" hidden><div class="field-grid"><label>Itemnaam<input id="newItemName" placeholder="Bijv. Canvas tas" /></label><label>SKU<input id="newItemSku" placeholder="CT-001" /></label></div></div>
+      <div class="field-grid transaction-fields"><label>Aantal<input id="quantity" type="number" min="1" value="1" required /></label><label>Prijs per item<input id="price" type="number" min="0" step="0.01" placeholder="0,00" required /></label></div>
+      <label id="partyLabel">Leverancier<input id="party" placeholder="Naam leverancier" required /></label>
+      <label id="statusLabel" class="check-row"><input id="status" type="checkbox" /><span><strong>Al geleverd</strong><small>De voorraad wordt direct bijgewerkt.</small></span></label>
+      <div class="dialog-actions"><button class="button ghost" value="cancel">Annuleren</button><button class="button primary" id="saveTransaction" value="default">Opslaan</button></div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
+
