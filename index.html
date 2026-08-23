@@ -87,5 +87,31 @@
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
+  <script>
+    (() => {
+      const greetingForHour = hour => {
+        if (hour >= 5 && hour < 12) return 'Goedemorgen';
+        if (hour >= 12 && hour < 18) return 'Goedemiddag';
+        if (hour >= 18 && hour < 23) return 'Goedenavond';
+        return 'Goedenacht';
+      };
+
+      const updateGreeting = () => {
+        const overview = document.getElementById('overview');
+        const title = document.getElementById('pageTitle');
+        if (overview?.classList.contains('active-view') && title) {
+          title.textContent = greetingForHour(new Date().getHours());
+        }
+      };
+
+      updateGreeting();
+      setInterval(updateGreeting, 60_000);
+      document.addEventListener('click', event => {
+        if (event.target.closest('[data-view="overview"], [data-go="overview"]')) {
+          setTimeout(updateGreeting, 0);
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
