@@ -19,7 +19,7 @@ DB_PATH = Path(os.environ.get("STOCKROOM_DB_PATH", "/data/stockroom.db"))
 USERNAME = os.environ.get("STOCKROOM_USERNAME", "")
 PASSWORD = os.environ.get("STOCKROOM_PASSWORD", "")
 MAX_BODY_BYTES = 1_000_000
-SESSION_TTL_SECONDS = 10 * 60
+SESSION_TTL_SECONDS = 30 * 60
 SESSION_COOKIE = "stockroom_session"
 
 # Sessies staan bewust alleen in het geheugen. Een herstart/deploy logt iedereen uit.
@@ -128,7 +128,7 @@ label{display:block;margin:14px 0 6px;font-size:13px;font-weight:700}input{width
 button{width:100%;margin-top:20px;border:0;border-radius:10px;padding:12px 14px;background:#111827;color:#fff;font:inherit;font-weight:700;cursor:pointer}.error{margin:0 0 14px;padding:10px 12px;border-radius:9px;background:#fef2f2;color:#991b1b;font-size:13px}.note{margin:16px 0 0;color:#9ca3af;text-align:center;font-size:12px}
 </style>
 </head>
-<body><main class="login"><h1>Stockroom</h1><p class="sub">Log in om het dashboard te openen.</p>{error}<form method="post" action="/login" autocomplete="on"><label for="username">Gebruikersnaam</label><input id="username" name="username" type="text" autocomplete="username" required autofocus><label for="password">Wachtwoord</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Inloggen</button></form><p class="note">Je sessie verloopt automatisch na 10 minuten.</p></main></body></html>"""
+<body><main class="login"><h1>Stockroom</h1><p class="sub">Log in om het dashboard te openen.</p>{error}<form method="post" action="/login" autocomplete="on"><label for="username">Gebruikersnaam</label><input id="username" name="username" type="text" autocomplete="username" required autofocus><label for="password">Wachtwoord</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Inloggen</button></form><p class="note">Je sessie verloopt automatisch na 30 minuten.</p></main></body></html>"""
 
 
 class StockroomHandler(SimpleHTTPRequestHandler):
