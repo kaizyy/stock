@@ -64,8 +64,8 @@
   </div>
 
   <dialog id="transactionDialog">
-    <form method="dialog" id="transactionForm">
-      <div class="dialog-head"><div><p class="eyebrow">Nieuwe registratie</p><h2 id="dialogTitle">Transactie toevoegen</h2></div><button class="icon-button" value="cancel" aria-label="Sluiten">×</button></div>
+    <form method="dialog" id="transactionForm" novalidate>
+      <div class="dialog-head"><div><p class="eyebrow">Nieuwe registratie</p><h2 id="dialogTitle">Transactie toevoegen</h2></div><button class="icon-button" value="cancel" formnovalidate aria-label="Sluiten">×</button></div>
       <div class="type-switch"><button type="button" class="active" data-type="incoming">↓ Inkomend</button><button type="button" data-type="outgoing">↑ Uitgaand</button><button type="button" data-type="item">□ Nieuw item</button></div>
       <input type="hidden" id="transactionType" value="incoming" />
       <label>Item<select id="itemSelect" required></select></label>
@@ -75,7 +75,7 @@
       <label id="partyLabel">Leverancier <span class="optional-label">optioneel</span><input id="party" placeholder="Naam leverancier" /></label>
       <label id="statusLabel" class="check-row"><input id="status" type="checkbox" /><span><strong>Al geleverd</strong><small>De voorraad wordt direct bijgewerkt.</small></span></label>
       <label id="incomingPaidLabel" class="check-row"><input id="incomingPaid" type="checkbox" /><span><strong>Al betaald</strong><small>Deze inkoopkosten worden van de daadwerkelijke omzet afgetrokken.</small></span></label>
-      <div class="dialog-actions"><button class="button ghost" value="cancel">Annuleren</button><button class="button primary" id="saveTransaction" value="default">Opslaan</button></div>
+      <div class="dialog-actions"><button class="button ghost" value="cancel" formnovalidate>Annuleren</button><button class="button primary" id="saveTransaction" value="default">Opslaan</button></div>
     </form>
   </dialog>
   <dialog id="archiveDialog">
@@ -89,4 +89,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-
