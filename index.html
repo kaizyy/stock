@@ -45,6 +45,11 @@
           <article class="panel activity-panel"><div class="panel-head"><div><p class="eyebrow">Recente updates</p><h3>Activiteit</h3></div></div><div id="activityList" class="activity-list"></div></article>
         </div>
 
+        <article class="panel chart-panel">
+          <div class="panel-head"><div><p class="eyebrow">Visueel overzicht</p><h3>Voorraad & omzet</h3></div><div class="chart-legend"><span><i class="actual"></i>Daadwerkelijk</span><span><i class="potential"></i>Potentieel</span></div></div>
+          <div class="chart-grid"><section><h4>Hoeveelheid voorraad</h4><div id="stockChart" class="stock-chart" role="img" aria-label="Hoeveelheid voorraad per item"></div></section><section><h4>Daadwerkelijke en potentiële omzet</h4><div id="revenueChart" class="revenue-chart" role="img" aria-label="Daadwerkelijke en potentiële omzet per item"></div></section></div>
+        </article>
+
         <div class="status-grid">
           <article class="status-card warning"><div><span class="status-symbol">€</span><div><p>Nog niet betaald</p><strong id="unpaidSummary">Geen openstaande betalingen</strong></div></div><button data-go="outgoing">Bekijken →</button></article>
           <article class="status-card info"><div><span class="status-symbol">⌁</span><div><p>Nog niet geleverd</p><strong id="undeliveredSummary">Geen leveringen onderweg</strong></div></div><button data-go="incoming">Bekijken →</button></article>
