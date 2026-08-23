@@ -18,6 +18,8 @@ De volledige website, inclusief CSS en JavaScript, is beveiligd met HTTP Basic A
 
 De container start bewust niet als een van de twee inlogvariabelen ontbreekt. Voorraad en transacties worden centraal opgeslagen in `/data/stockroom.db`. Zolang `/data` als persistent volume is gekoppeld, blijven de gegevens behouden bij rebuilds, restarts en redeploys. De gegevens zijn bovendien beschikbaar vanaf ieder apparaat dat met de juiste inloggegevens toegang heeft.
 
+Bij het starten corrigeert de container automatisch de schrijfrechten van het gekoppelde Coolify-volume. De applicatieserver blijft daarna als beperkte gebruiker draaien.
+
 ## Lokaal draaien
 
 ```bash
