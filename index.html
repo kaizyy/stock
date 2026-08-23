@@ -36,7 +36,7 @@
       <section id="overview" class="view active-view">
         <div class="summary-grid">
           <article class="metric accent inventory-metric"><p>Voorraadwaarde</p><div class="inventory-primary"><h2 id="inventoryBuyValue">€ 0,00</h2><span>Inkoopwaarde</span></div><div class="metric-breakdown"><div><small>Potentiële omzet</small><strong id="inventorySellValue">€ 0,00</strong></div><div><small>Mogelijke brutowinst</small><strong id="potentialProfitValue">€ 0,00</strong></div></div><span id="inventoryUnits">0 items op voorraad</span></article>
-          <article class="metric"><div class="metric-icon green">↗</div><p>Daadwerkelijke omzet</p><h2 id="revenueValue">€ 0,00</h2><span>Uit alle uitgaande items</span></article>
+          <article class="metric"><div class="metric-icon green">↗</div><p>Daadwerkelijke omzet</p><h2 id="revenueValue">€ 0,00</h2><span>Uitgaand minus betaalde inkoop</span></article>
           <article class="metric"><div class="metric-icon amber">◷</div><p>Openstaand</p><h2 id="outstandingValue">€ 0,00</h2><span id="outstandingCount">0 betalingen te ontvangen</span></article>
           <article class="metric"><div class="metric-icon blue">▣</div><p>Verwacht</p><h2 id="expectedCount">0</h2><span>Inkomende leveringen</span></article>
         </div>
@@ -69,6 +69,7 @@
       <div class="field-grid transaction-fields"><label>Aantal<input id="quantity" type="number" min="1" value="1" required /></label><label>Prijs per item<input id="price" type="number" min="0" step="0.01" placeholder="0,00" required /></label></div>
       <label id="partyLabel">Leverancier<input id="party" placeholder="Naam leverancier" required /></label>
       <label id="statusLabel" class="check-row"><input id="status" type="checkbox" /><span><strong>Al geleverd</strong><small>De voorraad wordt direct bijgewerkt.</small></span></label>
+      <label id="incomingPaidLabel" class="check-row"><input id="incomingPaid" type="checkbox" /><span><strong>Al betaald</strong><small>Deze inkoopkosten worden van de daadwerkelijke omzet afgetrokken.</small></span></label>
       <div class="dialog-actions"><button class="button ghost" value="cancel">Annuleren</button><button class="button primary" id="saveTransaction" value="default">Opslaan</button></div>
     </form>
   </dialog>
