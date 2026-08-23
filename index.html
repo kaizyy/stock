@@ -67,7 +67,7 @@
       <label>Item<select id="itemSelect" required></select></label>
       <div id="newItemFields" hidden><div class="field-grid"><label>Itemnaam<input id="newItemName" placeholder="Bijv. Canvas tas" /></label><label>SKU<input id="newItemSku" placeholder="CT-001" /></label></div></div>
       <div class="field-grid transaction-fields"><label>Aantal<input id="quantity" type="number" min="1" value="1" required /></label><label>Prijs per item<input id="price" type="number" min="0" step="0.01" placeholder="0,00" required /></label></div>
-      <label id="partyLabel">Leverancier<input id="party" placeholder="Naam leverancier" required /></label>
+      <label id="partyLabel">Leverancier <span class="optional-label">optioneel</span><input id="party" placeholder="Naam leverancier" /></label>
       <label id="statusLabel" class="check-row"><input id="status" type="checkbox" /><span><strong>Al geleverd</strong><small>De voorraad wordt direct bijgewerkt.</small></span></label>
       <label id="incomingPaidLabel" class="check-row"><input id="incomingPaid" type="checkbox" /><span><strong>Al betaald</strong><small>Deze inkoopkosten worden van de daadwerkelijke omzet afgetrokken.</small></span></label>
       <div class="dialog-actions"><button class="button ghost" value="cancel">Annuleren</button><button class="button primary" id="saveTransaction" value="default">Opslaan</button></div>
