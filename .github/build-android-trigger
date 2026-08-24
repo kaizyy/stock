@@ -1,2 +1,2 @@
-2026-08-24T14:21:41Z
-Regression checks green; APK build explicitly requested by user.
+2026-08-24T14:24:00Z
+Regression assertion corrected; retry APK build.
