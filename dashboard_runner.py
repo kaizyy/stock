@@ -10,6 +10,15 @@ class DashboardHandler(runner.StockroomHandler):
     def do_GET(self):
         path = urlparse(self.path).path
 
+        if path in ("/", "/index.html"):
+            session = self.require_session(api=False)
+            if not session:
+                return
+            content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+            content = content.replace("</body>", '<script src="/settings.js"></script></body>')
+            self.send_html(200, content)
+            return
+
         if path in ("/members", "/account"):
             session = self.require_session(api=False)
             if not session:
