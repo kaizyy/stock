@@ -77,7 +77,7 @@ def check_web_feature_parity() -> None:
     ], "Webdashboard")
 
     require(settings, [
-        'data-view = \'settings\'',
+        "settingsButton.dataset.view = 'settings'",
         'Gebruikers & rollen', 'Mijn account', 'Account permanent verwijderen',
         '/api/members', '/members/add', '/members/role', '/members/remove', '/account/delete',
         "body[data-stockroom-role=\"viewer\"]", "body[data-stockroom-role=\"buyer\"]", "body[data-stockroom-role=\"seller\"]",
@@ -131,8 +131,8 @@ def check_android_shell() -> None:
         '?: "https://stock.valerith.nl"',
     ], "Android buildconfig")
 
-    assert "MainActivity.kt" not in [p.name for p in (ROOT / "android/app/src/main/java/nl/valerith/stockroom").glob("MainActivity.*") if p.suffix == ".kt"], \
-        "Oude native MainActivity.kt mag niet naast de parity-shell blijven bestaan"
+    kotlin_main = ROOT / "android/app/src/main/java/nl/valerith/stockroom/MainActivity.kt"
+    assert not kotlin_main.exists(), "Oude native MainActivity.kt mag niet naast de parity-shell blijven bestaan"
 
 
 def check_build_gate() -> None:
