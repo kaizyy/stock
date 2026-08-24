@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache curl su-exec \
     && pip install --no-cache-dir "psycopg[binary]>=3.2,<4"
 
-COPY server.py runner.py /app/
+COPY server.py runner.py dashboard_runner.py /app/
 COPY index.html styles.css app.js /app/public/
 COPY docker-entrypoint.sh /usr/local/bin/stockroom-entrypoint
 
@@ -19,4 +19,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl --fail --silent --show-error http://127.0.0.1:8000/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/stockroom-entrypoint"]
-CMD ["python", "/app/runner.py"]
+CMD ["python", "/app/dashboard_runner.py"]
