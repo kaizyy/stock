@@ -62,6 +62,71 @@ class AppHandler(dashboard.DashboardHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+
+        if path == "/api/mobile/login":
+            form = self.form_data()
+            email = form.get("email", [""])[0].strip().lower() if form else ""
+            password = form.get("password", [""])[0] if form else ""
+            if not email or not password:
+                self.send_json(400, {"error": "E-mailadres en wachtwoord zijn verplicht."})
+                return
+            with server.db() as conn:
+                user = conn.execute(
+                    "SELECT id::text,email,name,password_salt,password_hash,email_verified_at FROM users WHERE email=%s",
+                    (email,),
+                ).fetchone()
+            if not user or not server.verify_password(password, user["password_salt"], user["password_hash"]):
+                self.send_json(403, {"error": "E-mailadres of wachtwoord is onjuist."})
+                return
+            if not user["email_verified_at"]:
+                self.send_json(403, {"error": "Verifieer eerst je e-mailadres."})
+                return
+            memberships = self.memberships_for(user["id"])
+            if not memberships:
+                self.send_json(403, {"error": "Dit account is niet gekoppeld aan een stockroom."})
+                return
+            room = memberships[0]
+            token, expires_at = server.create_session(user["id"], room["stockroom_id"])
+            self.send_json(200, {
+                "token": token,
+                "expiresAt": expires_at,
+                "user": {"id": user["id"], "name": user["name"], "email": user["email"]},
+                "stockroom": {"id": room["stockroom_id"], "name": room["stockroom_name"], "role": room["role"]},
+            })
+            return
+
+        if path == "/api/mobile/logout":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            token = self.cookie_token()
+            if token:
+                with server.db() as conn:
+                    conn.execute("DELETE FROM sessions WHERE token_hash=%s", (server.token_digest(token),))
+                    conn.commit()
+            self.send_json(200, {"loggedOut": True})
+            return
+
+        if path == "/api/mobile/switch-stockroom":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            form = self.form_data()
+            stockroom_id = form.get("stockroom_id", [""])[0] if form else ""
+            membership = next((m for m in self.memberships_for(session["user_id"]) if m["stockroom_id"] == stockroom_id), None)
+            if not membership:
+                self.send_json(403, {"error": "Je hebt geen toegang tot deze stockroom."})
+                return
+            token = self.cookie_token()
+            with server.db() as conn:
+                conn.execute(
+                    "UPDATE sessions SET active_stockroom_id=%s WHERE token_hash=%s",
+                    (stockroom_id, server.token_digest(token)),
+                )
+                conn.commit()
+            self.send_json(200, {"switched": True, "stockroom": membership})
+            return
+
         if path == "/api/stockrooms/create":
             session = self.require_session(api=True)
             if not session:
@@ -82,5 +147,5 @@ if __name__ == "__main__":
     server.cleanup_expired()
     handler = partial(AppHandler, directory=str(server.PUBLIC_DIR))
     httpd = ThreadingHTTPServer((server.HOST, server.PORT), handler)
-    print("Stockroom draait met gecontroleerde rechtenmatrix en rolbewust dashboard", flush=True)
+    print("Stockroom draait met gecontroleerde rechtenmatrix, rolbewust dashboard en mobiele API", flush=True)
     httpd.serve_forever()
