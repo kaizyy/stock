@@ -60,6 +60,15 @@ def audit(conn, session, action, details=None, stockroom_id=None, user_id=None):
     )
 
 
+def clear_audit_log(conn, session):
+    deleted = conn.execute(
+        "DELETE FROM audit_log WHERE stockroom_id=%s RETURNING id",
+        (session["stockroom_id"],),
+    ).fetchall()
+    audit(conn, session, "audit.cleared", {"deleted": len(deleted)})
+    return len(deleted)
+
+
 def role_allowed(actor_role, target_role):
     allowed = {"member", "buyer", "seller", "viewer"}
     if actor_role == "owner":
@@ -438,6 +447,19 @@ class DashboardHandler(runner.StockroomHandler):
                 self.send_json(502, {"error": f"Uitnodiging opgeslagen, maar e-mail verzenden mislukte: {type(exc).__name__}"})
                 return
             self.send_json(200, {"sent": True})
+            return
+
+        if path == "/api/audit/clear":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            if session["role"] not in ("owner", "admin"):
+                self.send_json(403, {"error": "Alleen Owner of Admin kan het auditlog wissen."})
+                return
+            with server.db() as conn:
+                deleted = clear_audit_log(conn, session)
+                conn.commit()
+            self.send_json(200, {"cleared": True, "deleted": deleted})
             return
 
         if path == "/api/stockrooms/create":

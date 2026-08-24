@@ -82,6 +82,18 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIsNotNone(remaining_b)
         self.assertEqual((b_members, b_invites, b_audit), (1, 1, 1))
 
+    def test_clearing_audit_is_limited_to_active_tenant(self):
+        session = {"stockroom_id": str(self.a_room), "user_id": str(self.a_user)}
+        with server.db() as conn:
+            deleted = dashboard_runner.clear_audit_log(conn, session)
+            a_actions = conn.execute("SELECT action FROM audit_log WHERE stockroom_id=%s", (self.a_room,)).fetchall()
+            b_actions = conn.execute("SELECT action FROM audit_log WHERE stockroom_id=%s", (self.b_room,)).fetchall()
+            conn.rollback()
+        self.assertEqual(deleted, 1)
+        text = lambda value: value.decode() if isinstance(value, bytes) else value
+        self.assertEqual([text(row["action"]) for row in a_actions], ["audit.cleared"])
+        self.assertEqual([text(row["action"]) for row in b_actions], ["tenant-b"])
+
     def test_auth_token_is_expiring_and_single_use(self):
         raw = server.create_auth_token(self.a_user, "reset_password", 60)
         with server.db() as conn:

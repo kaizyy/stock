@@ -64,7 +64,7 @@ class AppHandler(dashboard.DashboardHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260824-4"></script><script src="/features.js?v=20260824-4"></script><script src="/features_optional_fix.js?v=20260824-4"></script><script src="/role_dashboard.js?v=20260824-4"></script></body>'
+                '<script src="/settings.js?v=20260824-5"></script><script src="/features.js?v=20260824-5"></script><script src="/features_optional_fix.js?v=20260824-5"></script><script src="/role_dashboard.js?v=20260824-5"></script></body>'
             )
             self.send_html(200, content)
             return

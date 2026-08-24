@@ -10,13 +10,13 @@
     .feature-panel h3{margin:0 0 6px}.feature-panel>p{margin:0 0 18px;color:var(--muted)}
     .feature-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.feature-row input,.feature-row select{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;background:#fff}
     .feature-row input{min-width:180px;flex:1}.feature-row .button{margin:0}
-    .room-list,.invite-list,.audit-list{display:grid;gap:10px;margin-top:16px}.room-item,.invite-item,.audit-item{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:12px 14px;background:var(--paper);border-radius:12px}
+    .room-list,.invite-list,.audit-list{display:grid;gap:10px;margin-top:16px}.room-item,.invite-item,.audit-item{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:12px 14px;background:var(--paper);border-radius:12px}.feature-panel-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.feature-panel-head h3{margin-top:0}.feature-panel-head p{margin-bottom:0}.button.danger{background:#9b1c1c;color:#fff;white-space:nowrap}
     .room-item strong,.invite-item strong,.audit-item strong{display:block}.room-item small,.invite-item small,.audit-item small{color:var(--muted)}
     .room-item form{margin:0}.room-item button{border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 10px;cursor:pointer}.room-item.active button{font-weight:700}
     .inventory-admin-table{width:100%;border-collapse:collapse}.inventory-admin-table th,.inventory-admin-table td{text-align:left;padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}.inventory-admin-table th{font-size:12px;color:var(--muted);text-transform:uppercase}.inventory-admin-table input{width:100%;min-width:90px;border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}.inventory-actions{display:flex;gap:7px;flex-wrap:wrap}.inventory-actions button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 9px;cursor:pointer}
     .low-stock-box{display:none;margin:0 0 20px;padding:14px 16px;border:1px solid #f0d6a4;background:#fff9ec;border-radius:14px}.low-stock-box.show{display:block}.low-stock-box strong{display:block;margin-bottom:6px}.low-stock-box span{color:#7a5a16;font-size:13px}
     .feature-message{display:none;margin:0 0 16px;padding:11px 13px;border-radius:10px;font-size:13px}.feature-message.show{display:block}.feature-message.ok{background:#ecfdf5;color:#065f46}.feature-message.error{background:#fef2f2;color:#991b1b}
-    @media(max-width:760px){.feature-panel{min-width:0;max-width:100%;overflow:hidden}.feature-row>*{min-width:0;max-width:100%}.room-item,.invite-item,.audit-item{align-items:flex-start;flex-direction:column;max-width:100%;overflow-wrap:anywhere}.inventory-admin-table{min-width:780px}.feature-table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}}
+    @media(max-width:760px){.feature-panel{min-width:0;max-width:100%;overflow:hidden}.feature-row>*{min-width:0;max-width:100%}.room-item,.invite-item,.audit-item,.feature-panel-head{align-items:flex-start;flex-direction:column;max-width:100%;overflow-wrap:anywhere}.inventory-admin-table{min-width:780px}.feature-table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}}
   `;
   document.head.appendChild(css);
 
@@ -50,7 +50,7 @@
   auditPanel.className = 'feature-panel';
   auditPanel.id = 'auditPanel';
   auditPanel.hidden = true;
-  auditPanel.innerHTML = `<h3>Auditlog</h3><p>De laatste wijzigingen in deze stockroom, inclusief gebruiker en tijdstip.</p><div id="auditList" class="audit-list">Laden…</div>`;
+  auditPanel.innerHTML = `<div class="feature-panel-head"><div><h3>Auditlog</h3><p>De laatste wijzigingen in deze stockroom, inclusief gebruiker en tijdstip.</p></div><button id="clearAuditBtn" class="button danger" type="button">Auditlog wissen</button></div><div id="auditList" class="audit-list">Laden…</div>`;
   host.appendChild(auditPanel);
 
   const overview = document.getElementById('overview');
@@ -150,6 +150,16 @@
       e.currentTarget.reset();
       say('Uitnodiging is per e-mail verstuurd.');
       await loadInvites(); await loadAudit();
+    } catch (err) { say(err.message, 'error'); }
+  });
+
+  document.getElementById('clearAuditBtn').addEventListener('click', async () => {
+    if (!me?.permissions.audit) return;
+    if (!confirm('Auditlog van deze stockroom wissen? Dit kan niet ongedaan worden gemaakt.')) return;
+    try {
+      const result = await fetchJSON('/api/audit/clear', {method:'POST'});
+      say(`${result.deleted} auditregel${result.deleted === 1 ? '' : 's'} gewist.`);
+      await loadAudit();
     } catch (err) { say(err.message, 'error'); }
   });
 
