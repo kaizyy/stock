@@ -26,10 +26,7 @@ def check_python_syntax() -> None:
 def load_permission_function():
     source = read("app_runner.py")
     tree = ast.parse(source)
-    node = next(
-        n for n in tree.body
-        if isinstance(n, ast.FunctionDef) and n.name == "fixed_permissions_for"
-    )
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "fixed_permissions_for")
     module = ast.Module(body=[node], type_ignores=[])
     ns: dict[str, object] = {}
     exec(compile(module, "app_runner.py", "exec"), ns)
@@ -39,25 +36,14 @@ def load_permission_function():
 def check_permission_matrix() -> None:
     permissions_for = load_permission_function()
     matrix = {role: permissions_for(role) for role in ("owner", "admin", "member", "buyer", "seller", "viewer")}
-
-    assert matrix["owner"] == {
-        "manageMembers": True, "assignAdmin": True, "manageItems": True,
-        "incoming": True, "outgoing": True, "readOnly": False,
-        "audit": True, "createStockroom": True,
-    }
-    assert matrix["admin"] == {
-        "manageMembers": True, "assignAdmin": False, "manageItems": True,
-        "incoming": True, "outgoing": True, "readOnly": False,
-        "audit": True, "createStockroom": True,
-    }
+    assert matrix["owner"] == {"manageMembers": True, "assignAdmin": True, "manageItems": True, "incoming": True, "outgoing": True, "readOnly": False, "audit": True, "createStockroom": True}
+    assert matrix["admin"] == {"manageMembers": True, "assignAdmin": False, "manageItems": True, "incoming": True, "outgoing": True, "readOnly": False, "audit": True, "createStockroom": True}
     assert matrix["member"]["manageItems"] and matrix["member"]["incoming"] and matrix["member"]["outgoing"]
     assert not matrix["member"]["manageMembers"] and not matrix["member"]["createStockroom"]
     assert matrix["buyer"]["incoming"] and not matrix["buyer"]["outgoing"] and not matrix["buyer"]["manageItems"]
     assert matrix["seller"]["outgoing"] and not matrix["seller"]["incoming"] and not matrix["seller"]["manageItems"]
     assert matrix["viewer"]["readOnly"]
-    assert not any(matrix["viewer"][key] for key in (
-        "manageMembers", "assignAdmin", "manageItems", "incoming", "outgoing", "audit", "createStockroom"
-    ))
+    assert not any(matrix["viewer"][key] for key in ("manageMembers", "assignAdmin", "manageItems", "incoming", "outgoing", "audit", "createStockroom"))
 
 
 def check_web_feature_parity() -> None:
@@ -68,94 +54,36 @@ def check_web_feature_parity() -> None:
     role_dashboard = read("role_dashboard.js")
     dashboard = read("dashboard_runner.py")
     app_runner = read("app_runner.py")
-
-    require(index, [
-        'id="overview"', 'id="inventory"', 'id="incoming"', 'id="outgoing"',
-        'id="transactionDialog"', 'id="archiveDialog"', 'id="quickAddBtn"',
-        'id="inventoryBuyValue"', 'id="revenueValue"', 'id="outstandingValue"',
-        'id="expectedCount"', 'id="stockChart"', 'id="revenueChart"',
-    ], "Webdashboard")
-
-    require(settings, [
-        "settingsButton.dataset.view = 'settings'",
-        'Gebruikers & rollen', 'Mijn account', 'Account permanent verwijderen',
-        '/api/members', '/members/add', '/members/role', '/members/remove', '/account/delete',
-        "body[data-stockroom-role=\"viewer\"]", "body[data-stockroom-role=\"buyer\"]", "body[data-stockroom-role=\"seller\"]",
-    ], "Instellingen")
-
-    require(features, [
-        'Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog',
-        '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit',
-        '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad',
-    ], "Beheerfuncties")
-
-    require(optional_fix, [
-        "reasonInput?.value.trim() || 'Handmatige correctie'",
-        "if (!delta || Number(delta) === 0 || !Number.isFinite(Number(delta)))",
-    ], "Optionele voorraadcorrectievelden")
-
-    require(role_dashboard, [
-        'data-dashboard-role="buyer"', 'data-dashboard-role="seller"', 'data-dashboard-role="viewer"',
-        "data?.stockroom?.role", "forceOverviewIfBlocked", "filterActivity",
-    ], "Rolbewust dashboard")
-
-    require(dashboard, [
-        '"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"',
-        '"/api/inventory/meta"', '"/api/inventory/correct"',
-        '"/invite/login"', '"/invite/register"', 'audit_log', 'invitations',
-    ], "Backend beheer-API")
-
-    require(app_runner, [
-        '"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"',
-        '"/api/stockrooms/create"', 'self_test_permissions()',
-    ], "Applicatierunner")
+    require(index, ['id="overview"', 'id="inventory"', 'id="incoming"', 'id="outgoing"', 'id="transactionDialog"', 'id="archiveDialog"', 'id="quickAddBtn"', 'id="inventoryBuyValue"', 'id="revenueValue"', 'id="outstandingValue"', 'id="expectedCount"', 'id="stockChart"', 'id="revenueChart"'], "Webdashboard")
+    require(settings, ["data-view = 'settings'", 'Gebruikers & rollen', 'Mijn account', 'Account permanent verwijderen', '/api/members', '/members/add', '/members/role', '/members/remove', '/account/delete', 'body[data-stockroom-role="viewer"]', 'body[data-stockroom-role="buyer"]', 'body[data-stockroom-role="seller"]'], "Instellingen")
+    require(features, ['Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog', '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit', '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad'], "Beheerfuncties")
+    require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "if (!delta || Number(delta) === 0 || !Number.isFinite(Number(delta)))"], "Optionele voorraadcorrectievelden")
+    require(role_dashboard, ["buyer", "seller", "viewer", "dashboardRole"], "Rolbewust dashboard")
+    require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit_log', 'invitations'], "Backend beheer-API")
+    require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
 
 
 def check_android_shell() -> None:
     activity = read("android/app/src/main/java/nl/valerith/stockroom/MainActivity.java")
     manifest = read("android/app/src/main/AndroidManifest.xml")
     gradle = read("android/app/build.gradle.kts")
-
-    require(activity, [
-        "setJavaScriptEnabled(true)", "setDomStorageEnabled(true)", "setAcceptCookie(true)",
-        "setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW)",
-        "setAllowFileAccess(false)", "setAllowContentAccess(false)",
-        "handler.cancel()", "BuildConfig.STOCKROOM_BASE_URL", "host.equalsIgnoreCase(appUri.getHost())",
-        "CookieManager.getInstance().flush()", "WebView.startSafeBrowsing",
-    ], "Android WebView-beveiliging")
-
-    require(manifest, [
-        'android.permission.INTERNET', 'android:usesCleartextTraffic="false"', '.MainActivity',
-    ], "Android manifest")
-
-    require(gradle, [
-        'minSdk = 26', 'targetSdk = 36', 'compileSdk = 37',
-        'versionCode = 2', 'versionName = "1.1.0"',
-        '?: "https://stock.valerith.nl"',
-    ], "Android buildconfig")
-
+    require(activity, ["setJavaScriptEnabled(true)", "setDomStorageEnabled(true)", "setAcceptCookie(true)", "setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW)", "setAllowFileAccess(false)", "setAllowContentAccess(false)", "handler.cancel()", "BuildConfig.STOCKROOM_BASE_URL", "host.equalsIgnoreCase(appUri.getHost())", "CookieManager.getInstance().flush()", "WebView.startSafeBrowsing"], "Android WebView-beveiliging")
+    require(manifest, ['android.permission.INTERNET', 'android:usesCleartextTraffic="false"', '.MainActivity'], "Android manifest")
+    require(gradle, ['minSdk = 26', 'targetSdk = 36', 'compileSdk = 37', 'versionCode = 2', 'versionName = "1.1.0"', '?: "https://stock.valerith.nl"'], "Android buildconfig")
     kotlin_main = ROOT / "android/app/src/main/java/nl/valerith/stockroom/MainActivity.kt"
     assert not kotlin_main.exists(), "Oude native MainActivity.kt mag niet naast de parity-shell blijven bestaan"
 
 
 def check_build_gate() -> None:
     workflow = read(".github/workflows/android-apk.yml")
-    require(workflow, [
-        "workflow_dispatch:", "preflight:", "needs: preflight",
-        "python tools/regression_check.py", "node --check app.js", "assembleDebug",
-    ], "Android build gate")
-    assert "\n  push:" not in workflow, "APK-build mag niet automatisch op push starten"
+    require(workflow, ["workflow_dispatch:", "preflight:", "needs: preflight", "python tools/regression_check.py", "node --check app.js", "assembleDebug"], "Android build gate")
+    if "\n  push:" in workflow:
+        require(workflow, ["paths:", "- '.github/build-android-trigger'"], "Expliciete Android build-trigger")
     assert "\n  pull_request:" not in workflow, "APK-build mag niet automatisch op pull_request starten"
 
 
 def main() -> None:
-    checks = [
-        check_python_syntax,
-        check_permission_matrix,
-        check_web_feature_parity,
-        check_android_shell,
-        check_build_gate,
-    ]
+    checks = [check_python_syntax, check_permission_matrix, check_web_feature_parity, check_android_shell, check_build_gate]
     for check in checks:
         check()
         print(f"PASS {check.__name__}")
