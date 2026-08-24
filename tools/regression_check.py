@@ -53,6 +53,7 @@ def check_web_feature_parity() -> None:
     features = read("features.js")
     optional_fix = read("features_optional_fix.js")
     role_dashboard = read("role_dashboard.js")
+    app = read("app.js")
     dashboard = read("dashboard_runner.py")
     app_runner = read("app_runner.py")
     require(index, ['id="overview"', 'id="inventory"', 'id="incoming"', 'id="outgoing"', 'id="transactionDialog"', 'id="archiveDialog"', 'id="quickAddBtn"', 'id="inventoryBuyValue"', 'id="revenueValue"', 'id="outstandingValue"', 'id="outstandingOverdueValue"', 'id="expectedValue"', 'id="expectedPaidValue"', 'id="expectedUnpaidValue"', 'id="stockChart"', 'id="revenueChart"'], "Webdashboard")
@@ -61,6 +62,7 @@ def check_web_feature_parity() -> None:
     require(features, ['Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog', '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit', '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad'], "Beheerfuncties")
     require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "if (!delta || Number(delta) === 0 || !Number.isFinite(Number(delta)))"], "Optionele voorraadcorrectievelden")
     require(role_dashboard, ["buyer", "seller", "viewer", "dashboardRole"], "Rolbewust dashboard")
+    require(app, ["transactionDate", "storedTransactionDate", "data-edit-transaction", "Uitgaande bestelling bijgewerkt."], "Handmatige transactiedatum en uitgaand bewerken")
     require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit_log', 'invitations'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
 
