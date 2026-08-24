@@ -7,6 +7,11 @@ on:
       - 'android/**'
       - 'app_runner.py'
       - '.github/workflows/android-apk.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'app_runner.py'
+      - '.github/workflows/android-apk.yml'
 
 jobs:
   build-debug-apk:
