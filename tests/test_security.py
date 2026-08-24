@@ -1,10 +1,21 @@
 import unittest
 from unittest.mock import patch
+from io import BytesIO
+from email.message import Message
 
 import server
 
 
 class SecurityUnitTests(unittest.TestCase):
+    def make_form_handler(self, body, content_type):
+        handler = object.__new__(server.StockroomHandler)
+        headers = Message()
+        headers["Content-Length"] = str(len(body))
+        headers["Content-Type"] = content_type
+        handler.headers = headers
+        handler.rfile = BytesIO(body)
+        return handler
+
     def test_password_hash_roundtrip_and_wrong_password(self):
         salt, digest = server.hash_password("a sufficiently long password")
         self.assertTrue(server.verify_password("a sufficiently long password", salt, digest, 2))
@@ -32,6 +43,20 @@ class SecurityUnitTests(unittest.TestCase):
         handler.send_json = lambda status, value: responses.append((status, value))
         self.assertFalse(handler.enforce_origin())
         self.assertEqual(responses[0][0], 403)
+
+    def test_urlencoded_form_data_remains_supported(self):
+        handler = self.make_form_handler(b"item_id=abc&min_stock=4", "application/x-www-form-urlencoded")
+        self.assertEqual(handler.form_data(), {"item_id": ["abc"], "min_stock": ["4"]})
+
+    def test_multipart_form_data_used_by_inventory_actions(self):
+        boundary = "stockroom-test-boundary"
+        body = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"item_id\"\r\n\r\nabc-123\r\n"
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"category\"\r\n\r\nOnderdelen\r\n"
+            f"--{boundary}--\r\n"
+        ).encode()
+        handler = self.make_form_handler(body, f"multipart/form-data; boundary={boundary}")
+        self.assertEqual(handler.form_data(), {"item_id": ["abc-123"], "category": ["Onderdelen"]})
 
 
 if __name__ == "__main__":

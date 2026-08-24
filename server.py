@@ -9,6 +9,8 @@ import ssl
 import time
 import uuid
 import ipaddress
+from email import policy
+from email.parser import BytesParser
 from email.message import EmailMessage
 from functools import partial
 from http.cookies import SimpleCookie
@@ -411,9 +413,33 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             return None
         if length < 1 or length > max_bytes:
             return None
+        raw = self.rfile.read(length)
+        content_type = self.headers.get("Content-Type", "application/x-www-form-urlencoded")
+        media_type = content_type.split(";", 1)[0].strip().lower()
+        if media_type == "application/x-www-form-urlencoded":
+            try:
+                return parse_qs(raw.decode("utf-8"), keep_blank_values=True, max_num_fields=100)
+            except (UnicodeDecodeError, ValueError):
+                return None
+        if media_type != "multipart/form-data" or "boundary=" not in content_type.lower():
+            return None
         try:
-            return parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True)
-        except UnicodeDecodeError:
+            message = BytesParser(policy=policy.default).parsebytes(
+                b"Content-Type: " + content_type.encode("ascii") + b"\r\nMIME-Version: 1.0\r\n\r\n" + raw
+            )
+            result = {}
+            for index, part in enumerate(message.iter_parts()):
+                if index >= 100 or part.get_filename() is not None:
+                    return None
+                name = part.get_param("name", header="content-disposition")
+                if not name:
+                    continue
+                payload = part.get_payload(decode=True) or b""
+                charset = part.get_content_charset() or "utf-8"
+                value = payload.decode(charset)
+                result.setdefault(name, []).append(value)
+            return result
+        except (UnicodeDecodeError, LookupError, ValueError):
             return None
 
     def cookie_token(self):
