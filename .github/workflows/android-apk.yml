@@ -2,6 +2,10 @@ name: Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/build-android-trigger'
 
 jobs:
   preflight:
@@ -47,7 +51,7 @@ jobs:
 
       - name: Build debug APK
         env:
-          STOCKROOM_BASE_URL: ${{ vars.STOCKROOM_BASE_URL || 'https://stock.example.nl' }}
+          STOCKROOM_BASE_URL: ${{ vars.STOCKROOM_BASE_URL || 'https://stock.valerith.nl' }}
         run: gradle -p android assembleDebug -PSTOCKROOM_BASE_URL="$STOCKROOM_BASE_URL" --stacktrace
 
       - name: Upload APK artifact
@@ -63,4 +67,4 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk stockroom-debug.apk
           gh release delete android-latest --yes --cleanup-tag || true
-          gh release create android-latest stockroom-debug.apk --title "Stockroom Android latest" --notes "Handmatig gebouwde debug-APK na geslaagde regressiechecks."
+          gh release create android-latest stockroom-debug.apk --title "Stockroom Android latest" --notes "Gebouwde debug-APK na geslaagde regressiechecks."
