@@ -53,3 +53,14 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-debug.apk stockroom-debug.apk
           gh release delete android-latest --yes --cleanup-tag || true
           gh release create android-latest stockroom-debug.apk --title "Stockroom Android latest" --notes "Automatisch gebouwde debug-APK van main."
+
+      - name: Record successful run id
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p .ci
+          printf '%s\n' "$GITHUB_RUN_ID" > .ci/android-latest-run.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .ci/android-latest-run.txt
+          git commit -m "ci: record Android APK run $GITHUB_RUN_ID" || exit 0
+          git push
