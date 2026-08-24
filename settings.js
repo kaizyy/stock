@@ -50,7 +50,31 @@
     body[data-stockroom-role="seller"] .restore-item,
     body[data-stockroom-role="seller"] .purge-item,
     body[data-stockroom-role="seller"] #incomingCards .transaction-controls button{display:none!important}
-    @media(max-width:900px){.settings-grid{grid-template-columns:1fr}.settings-form{grid-template-columns:1fr}}
+    @media(max-width:900px){.settings-grid{grid-template-columns:minmax(0,1fr)}.settings-grid>div{min-width:0}.settings-form{grid-template-columns:1fr}}
+    @media(max-width:580px){
+      #settings{min-width:0;max-width:100%;overflow:hidden}
+      .settings-grid,.settings-grid>div,.settings-panel{min-width:0;max-width:100%}
+      .settings-panel{padding:16px;margin-bottom:16px;border-radius:14px}
+      .settings-panel h3,.settings-panel p,.account-summary>*{overflow-wrap:anywhere}
+      .settings-form .button,.settings-panel>a.button,.danger-button{width:100%}
+      .settings-table-wrap{max-width:100%;overflow:visible}
+      .settings-table{display:block;min-width:0!important;width:100%}
+      .settings-table thead{display:none}
+      .settings-table tbody,.settings-table tr{display:block;width:100%}
+      .settings-table tr{padding:12px 0;border-bottom:1px solid var(--line)}
+      .settings-table tr:last-child{border-bottom:0}
+      .settings-table td{display:grid;grid-template-columns:minmax(72px,.35fr) minmax(0,1fr);gap:10px;width:100%;padding:6px 0;border:0;overflow-wrap:anywhere}
+      .settings-table td::before{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+      .settings-table td:nth-child(1)::before{content:'Naam'}
+      .settings-table td:nth-child(2)::before{content:'E-mail'}
+      .settings-table td:nth-child(3)::before{content:'Rol'}
+      .settings-table td:nth-child(4)::before{content:'Acties'}
+      .settings-table td[colspan]{display:block;padding:10px 0}
+      .settings-table td[colspan]::before{content:none}
+      .member-actions{justify-content:flex-start;min-width:0}
+      .existing-role-select{min-width:0;max-width:100%}
+      .remove-member{padding-left:0}
+    }
   `;
   document.head.appendChild(style);
 
