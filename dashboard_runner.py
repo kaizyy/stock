@@ -136,6 +136,60 @@ def state_change_summary(old_state, new_state):
     return {"items": changed_items[:20], "transactionChanges": changed_tx}
 
 
+def low_stock_transitions(old_state, new_state):
+    old_items = item_map(old_state)
+    transitions = []
+    for item_id, item in item_map(new_state).items():
+        minimum = max(0, int(item.get("minStock") or 0))
+        stock = int(item.get("stock") or 0)
+        if minimum <= 0 or stock > minimum:
+            continue
+        old = old_items.get(item_id)
+        old_minimum = max(0, int((old or {}).get("minStock") or 0))
+        old_stock = int((old or {}).get("stock") or 0)
+        was_low = old is not None and old_minimum > 0 and old_stock <= old_minimum
+        if not was_low:
+            transitions.append({"id": item_id, "name": str(item.get("name") or item_id), "stock": stock, "minimum": minimum})
+    return transitions
+
+
+def notify_low_stock(stockroom_id, stockroom_name, items):
+    if not items:
+        return
+    with server.db() as conn:
+        recipients = conn.execute("""
+            SELECT DISTINCT u.email FROM users u
+            JOIN memberships m ON m.user_id=u.id
+            WHERE m.stockroom_id=%s AND m.role IN ('owner','admin','buyer')
+              AND u.email_verified_at IS NOT NULL
+            ORDER BY u.email
+        """, (stockroom_id,)).fetchall()
+    lines = "\n".join(f"- {item['name']}: voorraad {item['stock']}, minimum {item['minimum']}" for item in items)
+    sent, failed = 0, 0
+    for recipient in recipients:
+        email = recipient["email"].decode() if isinstance(recipient["email"], bytes) else recipient["email"]
+        try:
+            server.send_email(
+                email,
+                f"Lage voorraad in {stockroom_name}",
+                f"De volgende voorraad heeft het ingestelde minimum bereikt:\n\n{lines}\n\nOpen Stockroom om de voorraad te controleren.",
+            )
+            sent += 1
+        except Exception as exc:
+            failed += 1
+            server.log_event(f"[EMAIL ERROR] Lage-voorraadmelding mislukt: {type(exc).__name__}")
+    with server.db() as conn:
+        audit(conn, None, "inventory.low_stock_notified", {"items": items, "sent": sent, "failed": failed}, stockroom_id)
+        conn.commit()
+
+
+def safely_notify_low_stock(stockroom_id, stockroom_name, items):
+    try:
+        notify_low_stock(stockroom_id, stockroom_name, items)
+    except Exception as exc:
+        server.log_event(f"[LOW STOCK ERROR] Melding kon niet worden verwerkt: {type(exc).__name__}")
+
+
 def invite_page(token, invitation, error=""):
     feedback = f'<p class="error">{html.escape(error)}</p>' if error else ""
     email = html.escape(invitation["email"])
@@ -427,6 +481,7 @@ class DashboardHandler(runner.StockroomHandler):
             with server.db() as conn:
                 row = conn.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE", (session["stockroom_id"],)).fetchone()
                 state = row["state"]
+                old_state = json.loads(json.dumps(state))
                 target = next((i for i in state.get("items", []) if str(i.get("id")) == item_id), None)
                 if not target:
                     self.send_json(404, {"error": "Artikel niet gevonden."})
@@ -436,6 +491,7 @@ class DashboardHandler(runner.StockroomHandler):
                 conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
                 audit(conn, session, "item.settings_changed", {"item": target.get("name"), "before": before, "after": {"category": category, "supplier": supplier, "minStock": min_stock}})
                 conn.commit()
+            safely_notify_low_stock(session["stockroom_id"], session["stockroom_name"], low_stock_transitions(old_state, state))
             self.send_json(200, {"saved": True})
             return
 
@@ -460,6 +516,7 @@ class DashboardHandler(runner.StockroomHandler):
             with server.db() as conn:
                 row = conn.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE", (session["stockroom_id"],)).fetchone()
                 state = row["state"]
+                old_state = json.loads(json.dumps(state))
                 target = next((i for i in state.get("items", []) if str(i.get("id")) == item_id), None)
                 if not target:
                     self.send_json(404, {"error": "Artikel niet gevonden."})
@@ -474,6 +531,7 @@ class DashboardHandler(runner.StockroomHandler):
                 conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
                 audit(conn, session, "inventory.corrected", {"item": target.get("name"), "from": old_stock, "to": new_stock, "delta": delta, "reason": reason})
                 conn.commit()
+            safely_notify_low_stock(session["stockroom_id"], session["stockroom_name"], low_stock_transitions(old_state, state))
             self.send_json(200, {"saved": True, "stock": new_stock})
             return
 
@@ -517,6 +575,7 @@ class DashboardHandler(runner.StockroomHandler):
             if summary["items"] or summary["transactionChanges"]:
                 audit(conn, session, "state.updated", summary)
             conn.commit()
+        safely_notify_low_stock(session["stockroom_id"], session["stockroom_name"], low_stock_transitions(old_state, value))
         self.send_json(200, {"saved": True})
 
 

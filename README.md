@@ -29,6 +29,8 @@ Nieuwe registraties krijgen een verificatielink die 24 uur geldig is. Wachtwoord
 Bestaande accounts van vóór de introductie van e-mailverificatie blijven geverifieerd zodat zij niet worden buitengesloten.
 Oude wachtwoordhashes blijven werken en worden na een succesvolle login automatisch naar de sterkere instelling gemigreerd. Via `/account/security` kan een gebruiker een nieuw e-mailadres verifiëren of alle server-side sessies intrekken.
 
+Wanneer een artikel voor het eerst het ingestelde minimum bereikt of daaronder komt, ontvangen alle geverifieerde Owners, Admins en Inkopers van die stockroom een e-mail. De melding wordt niet herhaald zolang het artikel onder de drempel blijft; na herstel boven het minimum kan een volgende daling opnieuw een melding veroorzaken. Hiervoor moeten de SMTP-variabelen hierboven zijn ingesteld.
+
 ## Backups
 
 Zie [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) voor dagelijkse Coolify/Hetzner-backups, off-site opslag, restore en de verplichte periodieke restore-verificatietest.

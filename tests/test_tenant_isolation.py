@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 import uuid
+from unittest.mock import patch
 
 import psycopg
 
@@ -24,13 +25,17 @@ class TenantIsolationTests(unittest.TestCase):
 
     def setUp(self):
         self.a_user, self.b_user = uuid.uuid4(), uuid.uuid4()
+        self.a_admin, self.a_buyer, self.a_viewer = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         self.a_room, self.b_room = uuid.uuid4(), uuid.uuid4()
         salt, digest = server.hash_password("correct horse battery staple")
         with server.db() as conn:
             for uid, email in ((self.a_user, f"a-{uuid.uuid4()}@example.test"), (self.b_user, f"b-{uuid.uuid4()}@example.test")):
                 conn.execute("INSERT INTO users(id,email,name,password_salt,password_hash,password_version) VALUES(%s,%s,'Test',%s,%s,2)", (uid, email, salt, digest))
+            for uid, email in ((self.a_admin, "admin-a@example.test"), (self.a_buyer, "buyer-a@example.test"), (self.a_viewer, "viewer-a@example.test")):
+                conn.execute("INSERT INTO users(id,email,name,password_salt,password_hash,password_version) VALUES(%s,%s,'Test',%s,%s,2)", (uid, email, salt, digest))
             conn.execute("INSERT INTO stockrooms(id,name,created_by,state) VALUES(%s,'A',%s,%s::jsonb),(%s,'B',%s,%s::jsonb)", (self.a_room, self.a_user, json.dumps({"items":[{"id":"a-item"}],"transactions":[{"id":"a-tx"}]}), self.b_room, self.b_user, json.dumps({"items":[{"id":"b-item"}],"transactions":[{"id":"b-tx"}]})))
             conn.execute("INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,'owner'),(%s,%s,'owner')", (self.a_user, self.a_room, self.b_user, self.b_room))
+            conn.execute("INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,'admin'),(%s,%s,'buyer'),(%s,%s,'viewer')", (self.a_admin, self.a_room, self.a_buyer, self.a_room, self.a_viewer, self.a_room))
             conn.execute("INSERT INTO invitations(id,stockroom_id,email,role,token_hash,invited_by,expires_at) VALUES(%s,%s,'invite-a@example.test','member',%s,%s,NOW()+INTERVAL '1 day'),(%s,%s,'invite-b@example.test','member',%s,%s,NOW()+INTERVAL '1 day')", (uuid.uuid4(), self.a_room, uuid.uuid4().hex, self.a_user, uuid.uuid4(), self.b_room, uuid.uuid4().hex, self.b_user))
             conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action) VALUES(%s,%s,'tenant-a'),(%s,%s,'tenant-b')", (self.a_room, self.a_user, self.b_room, self.b_user))
             conn.commit()
@@ -38,7 +43,7 @@ class TenantIsolationTests(unittest.TestCase):
     def tearDown(self):
         with server.db() as conn:
             conn.execute("DELETE FROM stockrooms WHERE id IN (%s,%s)", (self.a_room, self.b_room))
-            conn.execute("DELETE FROM users WHERE id IN (%s,%s)", (self.a_user, self.b_user))
+            conn.execute("DELETE FROM users WHERE id IN (%s,%s,%s,%s,%s)", (self.a_user, self.b_user, self.a_admin, self.a_buyer, self.a_viewer))
             conn.commit()
 
     def test_a_cannot_read_b_inventory_transactions_users_invitations_or_audit(self):
@@ -51,7 +56,7 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIn("a-item", serialized)
         self.assertIn("a-tx", serialized)
         self.assertNotIn("b-item", serialized)
-        self.assertEqual([row["id"] for row in users], [self.a_user])
+        self.assertEqual({row["id"] for row in users}, {self.a_user, self.a_admin, self.a_buyer, self.a_viewer})
         text = lambda value: value.decode() if isinstance(value, bytes) else value
         self.assertEqual([text(row["email"]) for row in invites], ["invite-a@example.test"])
         self.assertEqual([text(row["action"]) for row in audit], ["tenant-a"])
@@ -91,6 +96,19 @@ class TenantIsolationTests(unittest.TestCase):
         server.initialize_database()
         runner.migrate_roles()
         dashboard_runner.initialize_enhancements()
+
+    def test_low_stock_mail_targets_owner_admin_and_buyer_only(self):
+        with patch.object(server, "send_email") as send:
+            dashboard_runner.notify_low_stock(
+                self.a_room,
+                "Tenant A",
+                [{"id": "a-item", "name": "Filter", "stock": 2, "minimum": 2}],
+            )
+        recipients = {call.args[0] for call in send.call_args_list}
+        self.assertIn("admin-a@example.test", recipients)
+        self.assertIn("buyer-a@example.test", recipients)
+        self.assertNotIn("viewer-a@example.test", recipients)
+        self.assertEqual(len(recipients), 3)
 
 
 if __name__ == "__main__":

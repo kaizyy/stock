@@ -9,6 +9,7 @@ import ssl
 import time
 import uuid
 import ipaddress
+from datetime import date, datetime
 from email import policy
 from email.parser import BytesParser
 from email.message import EmailMessage
@@ -151,6 +152,14 @@ def verify_password(password, salt, expected, version=1):
 
 def token_digest(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def json_default(value):
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def audit_user_action(conn, user_id, action, details=None):
@@ -541,7 +550,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_json(self, status, value):
-        body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        body = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=json_default).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

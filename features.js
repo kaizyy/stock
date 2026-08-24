@@ -68,7 +68,7 @@
     const r = await fetch(url, options);
     if (r.status === 401) { location.href = '/login'; throw new Error('session'); }
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || 'Actie mislukt.');
+    if (!r.ok) throw new Error(data.error || `Laden mislukt bij ${url} (HTTP ${r.status}).`);
     return data;
   }
 
@@ -126,7 +126,9 @@
   async function refreshFeatures() {
     try {
       await loadMe();
-      await Promise.all([loadRooms(), loadInventoryAdmin(), loadInvites(), loadAudit()]);
+      const results = await Promise.allSettled([loadRooms(), loadInventoryAdmin(), loadInvites(), loadAudit()]);
+      const failures = results.filter(result => result.status === 'rejected' && result.reason?.message !== 'session');
+      if (failures.length) say(`Niet alle instellingen konden worden geladen: ${failures.map(result => result.reason?.message || 'onbekende fout').join(' ')}`, 'error');
     } catch (e) {
       if (e.message !== 'session') say(e.message || 'Beheerfuncties konden niet worden geladen.', 'error');
     }
