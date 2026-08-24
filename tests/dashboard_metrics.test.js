@@ -28,4 +28,7 @@ assert.equal(metrics.isLowStock(state.items[0]), true);
 assert.equal(metrics.isLowStock(state.items[1]), false);
 assert.equal(metrics.isOlderThanDays({date:'2026-08-17T12:00:00Z'}, 7, now), false);
 assert.equal(metrics.overview({items:[], transactions:[{type:'incoming', qty:10, price:10, paid:true, done:true}]}, now).revenue, -100);
+assert.equal(metrics.stockAfterTransactionRemoval(3, {type:'outgoing', qty:2}), 5);
+assert.equal(metrics.stockAfterTransactionRemoval(8, {type:'incoming', qty:3, done:true}), 5);
+assert.equal(metrics.stockAfterTransactionRemoval(8, {type:'incoming', qty:3, done:false}), 8);
 console.log('PASS dashboard overview metrics');

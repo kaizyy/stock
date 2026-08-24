@@ -16,6 +16,14 @@
     return minimum > 0 && Number(item.stock || 0) <= minimum;
   }
 
+  function stockAfterTransactionRemoval(currentStock, transaction) {
+    const stock = Number(currentStock || 0);
+    const quantity = Number(transaction.qty || 0);
+    if (transaction.type === 'outgoing') return stock + quantity;
+    if (transaction.type === 'incoming' && transaction.done) return stock - quantity;
+    return stock;
+  }
+
   function overview(state, now = Date.now()) {
     const outgoing = state.transactions.filter(transaction => transaction.type === 'outgoing');
     const paidIncoming = state.transactions.filter(transaction => transaction.type === 'incoming' && transaction.paid);
@@ -39,5 +47,5 @@
     };
   }
 
-  return {overview, isLowStock, isOlderThanDays};
+  return {overview, isLowStock, isOlderThanDays, stockAfterTransactionRemoval};
 });
