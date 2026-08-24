@@ -1,28 +1,29 @@
-import json
 from functools import partial
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import server
 
+ORIGINAL_MEMBERS_PAGE = server.members_page
+
 
 def migrate_viewer_role():
     with server.db() as conn:
-        row = conn.execute("""
+        rows = conn.execute("""
             SELECT conname
             FROM pg_constraint
             WHERE conrelid = 'memberships'::regclass
               AND contype = 'c'
               AND pg_get_constraintdef(oid) LIKE '%role%'
-        """).fetchone()
-        if row:
+        """).fetchall()
+        for row in rows:
             conn.execute(f'ALTER TABLE memberships DROP CONSTRAINT "{row["conname"]}"')
         conn.execute("ALTER TABLE memberships ADD CONSTRAINT memberships_role_check CHECK (role IN ('owner','admin','member','viewer'))")
         conn.commit()
 
 
 def members_page(session, memberships, members, error="", success=""):
-    original = server.members_page(session, memberships, members, error, success)
+    original = ORIGINAL_MEMBERS_PAGE(session, memberships, members, error, success)
     if session["role"] not in ("owner", "admin"):
         return original
     marker = '<option value="member">Gebruiker</option>'
