@@ -1,6 +1,6 @@
 # Stockroom
 
-Multi-tenant voorraadbeheer met PostgreSQL. Iedere nieuwe registratie krijgt een eigen, afgescheiden stockroom. Gebruikers kunnen daarnaast expliciet worden gekoppeld aan een bestaande stockroom met de rollen `owner`, `admin` of `member`.
+Multi-tenant voorraadbeheer met PostgreSQL. Iedere nieuwe registratie krijgt een eigen, afgescheiden stockroom. Gebruikers kunnen daarnaast expliciet worden gekoppeld aan een bestaande stockroom met de rollen `owner`, `admin`, `member`, `buyer`, `seller` of `viewer`.
 
 ## Coolify
 
@@ -25,6 +25,22 @@ Nieuwe registraties krijgen een verificatielink die 24 uur geldig is. Wachtwoord
 
 Bestaande accounts van vóór de introductie van e-mailverificatie blijven geverifieerd zodat zij niet worden buitengesloten.
 
+## Android-app
+
+De native Kotlin/Jetpack Compose-client staat in `android/`. De Android-app gebruikt dezelfde PostgreSQL-data, sessies en server-side rollen als het webdashboard.
+
+Mobiele authenticatie gebruikt `/api/mobile/login`; daarna gebruikt de app de bestaande `/api/me` en `/api/state` endpoints. De sessieduur blijft maximaal 30 minuten.
+
+Stel voor het bouwen de publieke Stockroom-URL in:
+
+```bash
+gradle -p android assembleDebug -PSTOCKROOM_BASE_URL=https://stock.jouwdomein.nl
+```
+
+De GitHub Actions workflow `.github/workflows/android-apk.yml` bouwt automatisch een debug-APK en publiceert die als artifact `stockroom-android-debug`. Zet daarvoor bij voorkeur de repository variable `STOCKROOM_BASE_URL`.
+
+Zie `android/README.md` voor meer informatie.
+
 ## Datamodel
 
 De applicatie maakt bij het starten automatisch de benodigde tabellen aan:
@@ -34,6 +50,8 @@ De applicatie maakt bij het starten automatisch de benodigde tabellen aan:
 - `memberships`
 - `sessions`
 - `auth_tokens`
+- `invitations`
+- `audit_log`
 
 Voorraad- en transactiedata is altijd gekoppeld aan één stockroom. De actieve gebruiker kan alleen data lezen of wijzigen van een stockroom waarvoor een membership bestaat.
 
