@@ -36,6 +36,10 @@ SESSION_COOKIE = "stockroom_session"
 EMPTY_STATE = {"items": [], "transactions": []}
 
 
+def log_event(message):
+    print(message, flush=True)
+
+
 def db():
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
@@ -161,26 +165,56 @@ def create_auth_token(user_id, purpose, ttl_seconds):
 
 def send_email(to_email, subject, text):
     if not SMTP_HOST:
+        log_event("[SMTP ERROR] SMTP_HOST ontbreekt")
         raise RuntimeError("SMTP_HOST ontbreekt")
+
     msg = EmailMessage()
     msg["From"] = SMTP_FROM
     msg["To"] = to_email
     msg["Subject"] = subject
     msg.set_content(text)
     context = ssl.create_default_context()
-    if SMTP_PORT == 465:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=context) as smtp:
-            if SMTP_USERNAME:
-                smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-            smtp.send_message(msg)
-    else:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
-            smtp.ehlo()
-            smtp.starttls(context=context)
-            smtp.ehlo()
-            if SMTP_USERNAME:
-                smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-            smtp.send_message(msg)
+
+    log_event(f"[EMAIL] Verzenden naar {to_email} | onderwerp={subject!r}")
+    log_event(f"[SMTP] host={SMTP_HOST} port={SMTP_PORT} username={SMTP_USERNAME or '(geen)'} from={SMTP_FROM}")
+
+    try:
+        if SMTP_PORT == 465:
+            log_event("[SMTP] Verbinden via implicit TLS (465)")
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=context) as smtp:
+                log_event("[SMTP] Verbinding OK")
+                if SMTP_USERNAME:
+                    log_event("[SMTP] Authenticeren")
+                    smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+                    log_event("[SMTP] Authenticatie OK")
+                smtp.send_message(msg)
+                log_event("[SMTP] Bericht verzonden")
+        else:
+            log_event(f"[SMTP] Verbinden via STARTTLS ({SMTP_PORT})")
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
+                code, _ = smtp.ehlo()
+                log_event(f"[SMTP] EHLO antwoord={code}")
+                smtp.starttls(context=context)
+                log_event("[SMTP] STARTTLS OK")
+                code, _ = smtp.ehlo()
+                log_event(f"[SMTP] EHLO na TLS antwoord={code}")
+                if SMTP_USERNAME:
+                    log_event("[SMTP] Authenticeren")
+                    smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+                    log_event("[SMTP] Authenticatie OK")
+                smtp.send_message(msg)
+                log_event("[SMTP] Bericht verzonden")
+    except smtplib.SMTPAuthenticationError as exc:
+        detail = exc.smtp_error.decode("utf-8", errors="replace") if isinstance(exc.smtp_error, bytes) else str(exc.smtp_error)
+        log_event(f"[SMTP ERROR] Authenticatie mislukt: code={exc.smtp_code} detail={detail}")
+        raise
+    except smtplib.SMTPResponseException as exc:
+        detail = exc.smtp_error.decode("utf-8", errors="replace") if isinstance(exc.smtp_error, bytes) else str(exc.smtp_error)
+        log_event(f"[SMTP ERROR] Server antwoordde met fout: code={exc.smtp_code} detail={detail}")
+        raise
+    except (TimeoutError, OSError, ssl.SSLError, smtplib.SMTPException) as exc:
+        log_event(f"[SMTP ERROR] {type(exc).__name__}: {exc}")
+        raise
 
 
 AUTH_CSS = """
@@ -310,7 +344,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
     session = None
 
     def log_message(self, fmt, *args):
-        print(f"{self.address_string()} - {fmt % args}")
+        log_event(f"{self.address_string()} - {fmt % args}")
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -606,7 +640,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                 send_email(email, "Bevestig je Stockroom-account",
                            f"Hallo {name},\n\nBevestig je e-mailadres via deze link:\n{link}\n\nDe link is 24 uur geldig.")
             except Exception as exc:
-                print(f"Verificatiemail verzenden mislukt voor {email}: {exc}")
+                log_event(f"[EMAIL ERROR] Verificatiemail verzenden mislukt voor {email}: {type(exc).__name__}: {exc}")
                 self.send_html(503, result_page("Account aangemaakt", "Je account is aangemaakt, maar de verificatiemail kon niet worden verzonden. Controleer de SMTP-instellingen en vraag daarna een nieuwe verificatielink aan.", "/resend-verification", "Nieuwe verificatielink"))
                 return
             self.send_html(200, result_page("Controleer je e-mail", "Je account en eigen stockroom zijn aangemaakt. Bevestig eerst je e-mailadres voordat je inlogt."))
@@ -624,7 +658,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                     send_email(email, "Nieuwe Stockroom-verificatielink",
                                f"Hallo {user['name']},\n\nBevestig je e-mailadres via:\n{link}\n\nDe link is 24 uur geldig.")
                 except Exception as exc:
-                    print(f"Verificatiemail opnieuw verzenden mislukt voor {email}: {exc}")
+                    log_event(f"[EMAIL ERROR] Verificatiemail opnieuw verzenden mislukt voor {email}: {type(exc).__name__}: {exc}")
             self.send_html(200, resend_page(success="Als dit account verificatie nodig heeft, is er een nieuwe link verstuurd."))
             return
 
@@ -640,7 +674,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                     send_email(email, "Stockroom wachtwoord opnieuw instellen",
                                f"Hallo {user['name']},\n\nStel je wachtwoord opnieuw in via:\n{link}\n\nDe link is 30 minuten geldig.\nHeb je dit niet aangevraagd, negeer deze e-mail.")
                 except Exception as exc:
-                    print(f"Resetmail verzenden mislukt voor {email}: {exc}")
+                    log_event(f"[EMAIL ERROR] Resetmail verzenden mislukt voor {email}: {type(exc).__name__}: {exc}")
             self.send_html(200, forgot_page(success="Als dit e-mailadres geregistreerd is, is er een resetlink verstuurd."))
             return
 
@@ -778,5 +812,5 @@ if __name__ == "__main__":
     cleanup_expired()
     handler = partial(StockroomHandler, directory=str(PUBLIC_DIR))
     server = ThreadingHTTPServer((HOST, PORT), handler)
-    print(f"Stockroom draait op poort {PORT} met PostgreSQL, e-mailverificatie en {SESSION_TTL_SECONDS // 60} minuten sessies")
+    log_event(f"Stockroom draait op poort {PORT} met PostgreSQL, e-mailverificatie en {SESSION_TTL_SECONDS // 60} minuten sessies")
     server.serve_forever()
