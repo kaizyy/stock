@@ -4,8 +4,11 @@ import html
 import json
 import os
 import secrets
+import smtplib
+import ssl
 import time
 import uuid
+from email.message import EmailMessage
 from functools import partial
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -19,10 +22,17 @@ HOST = "0.0.0.0"
 PORT = 8000
 PUBLIC_DIR = Path("/app/public")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "").rstrip("/")
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USERNAME or "noreply@localhost")
 MAX_BODY_BYTES = 1_000_000
 SESSION_TTL_SECONDS = 30 * 60
+VERIFY_TTL_SECONDS = 24 * 60 * 60
+RESET_TTL_SECONDS = 30 * 60
 SESSION_COOKIE = "stockroom_session"
-
 EMPTY_STATE = {"items": [], "transactions": []}
 
 
@@ -40,9 +50,11 @@ def initialize_database():
                     name TEXT NOT NULL,
                     password_salt BYTEA NOT NULL,
                     password_hash BYTEA NOT NULL,
+                    email_verified_at TIMESTAMPTZ DEFAULT NOW(),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ DEFAULT NOW()")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS stockrooms (
                     id UUID PRIMARY KEY,
@@ -71,8 +83,19 @@ def initialize_database():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS auth_tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    purpose TEXT NOT NULL CHECK (purpose IN ('verify_email','reset_password')),
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_memberships_stockroom_id ON memberships(stockroom_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_purpose ON auth_tokens(user_id,purpose)")
         conn.commit()
 
 
@@ -92,16 +115,18 @@ def token_digest(token):
 
 
 def valid_state(value):
-    if not isinstance(value, dict):
-        return False
-    if not isinstance(value.get("items"), list) or not isinstance(value.get("transactions"), list):
-        return False
-    return all(isinstance(record, dict) for record in value["items"] + value["transactions"])
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("items"), list)
+        and isinstance(value.get("transactions"), list)
+        and all(isinstance(record, dict) for record in value["items"] + value["transactions"])
+    )
 
 
-def cleanup_sessions():
+def cleanup_expired():
     with db() as conn:
         conn.execute("DELETE FROM sessions WHERE expires_at <= NOW()")
+        conn.execute("DELETE FROM auth_tokens WHERE expires_at <= NOW() OR used_at IS NOT NULL")
         conn.commit()
 
 
@@ -110,31 +135,69 @@ def create_session(user_id, stockroom_id):
     expires_at = time.time() + SESSION_TTL_SECONDS
     with db() as conn:
         conn.execute(
-            """
-            INSERT INTO sessions (token_hash, user_id, active_stockroom_id, expires_at)
-            VALUES (%s, %s, %s, to_timestamp(%s))
-            """,
+            """INSERT INTO sessions(token_hash,user_id,active_stockroom_id,expires_at)
+               VALUES(%s,%s,%s,to_timestamp(%s))""",
             (token_digest(raw), user_id, stockroom_id, expires_at),
         )
         conn.commit()
     return raw, expires_at
 
 
+def create_auth_token(user_id, purpose, ttl_seconds):
+    raw = secrets.token_urlsafe(32)
+    with db() as conn:
+        conn.execute(
+            "DELETE FROM auth_tokens WHERE user_id=%s AND purpose=%s AND used_at IS NULL",
+            (user_id, purpose),
+        )
+        conn.execute(
+            """INSERT INTO auth_tokens(token_hash,user_id,purpose,expires_at)
+               VALUES(%s,%s,%s,NOW() + (%s * INTERVAL '1 second'))""",
+            (token_digest(raw), user_id, purpose, ttl_seconds),
+        )
+        conn.commit()
+    return raw
+
+
+def send_email(to_email, subject, text):
+    if not SMTP_HOST:
+        raise RuntimeError("SMTP_HOST ontbreekt")
+    msg = EmailMessage()
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(text)
+    context = ssl.create_default_context()
+    if SMTP_PORT == 465:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=context) as smtp:
+            if SMTP_USERNAME:
+                smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=context)
+            smtp.ehlo()
+            if SMTP_USERNAME:
+                smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(msg)
+
+
 AUTH_CSS = """
 :root{color-scheme:light;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f6f8;color:#111827;padding:24px}
-.card{width:min(100%,430px);background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:30px;box-shadow:0 18px 50px rgba(15,23,42,.08)}
+.card{width:min(100%,440px);background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:30px;box-shadow:0 18px 50px rgba(15,23,42,.08)}
 h1{margin:0 0 8px;font-size:26px}.sub{margin:0 0 24px;color:#6b7280;font-size:14px;line-height:1.5}
 label{display:block;margin:14px 0 6px;font-size:13px;font-weight:700}input,select{width:100%;border:1px solid #d1d5db;border-radius:10px;padding:12px 13px;font:inherit;outline:none}
 input:focus,select:focus{border-color:#111827;box-shadow:0 0 0 3px rgba(17,24,39,.08)}
 button,.button{display:inline-block;width:100%;margin-top:20px;border:0;border-radius:10px;padding:12px 14px;background:#111827;color:#fff;font:inherit;font-weight:700;cursor:pointer;text-align:center;text-decoration:none}
-.secondary{background:#fff;color:#111827;border:1px solid #d1d5db}.error{margin:0 0 14px;padding:10px 12px;border-radius:9px;background:#fef2f2;color:#991b1b;font-size:13px}
+.error{margin:0 0 14px;padding:10px 12px;border-radius:9px;background:#fef2f2;color:#991b1b;font-size:13px}
 .success{margin:0 0 14px;padding:10px 12px;border-radius:9px;background:#ecfdf5;color:#065f46;font-size:13px}
-.note{margin:16px 0 0;color:#9ca3af;text-align:center;font-size:12px}.note a{color:#374151}
+.note{margin:16px 0 0;color:#9ca3af;text-align:center;font-size:12px;line-height:1.6}.note a{color:#374151}
 """
 
 
-def auth_page(title, subtitle, form_html, error="", success=""):
+def auth_page(title, subtitle, body_html, error="", success=""):
     feedback = ""
     if error:
         feedback += f'<p class="error">{html.escape(error)}</p>'
@@ -142,76 +205,105 @@ def auth_page(title, subtitle, form_html, error="", success=""):
         feedback += f'<p class="success">{html.escape(success)}</p>'
     return f"""<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Stockroom</title><style>{AUTH_CSS}</style></head>
-<body><main class="card"><h1>{html.escape(title)}</h1><p class="sub">{html.escape(subtitle)}</p>{feedback}{form_html}</main></body></html>"""
+<body><main class="card"><h1>{html.escape(title)}</h1><p class="sub">{html.escape(subtitle)}</p>{feedback}{body_html}</main></body></html>"""
 
 
-def login_page(error=""):
-    form = """
-<form method="post" action="/login" autocomplete="on">
-<label for="email">E-mailadres</label><input id="email" name="email" type="email" autocomplete="email" required autofocus>
-<label for="password">Wachtwoord</label><input id="password" name="password" type="password" autocomplete="current-password" required>
+def login_page(error="", success=""):
+    body = """
+<form method="post" action="/login">
+<label>E-mailadres<input name="email" type="email" autocomplete="email" required autofocus></label>
+<label>Wachtwoord<input name="password" type="password" autocomplete="current-password" required></label>
 <button type="submit">Inloggen</button></form>
-<p class="note">Nog geen account? <a href="/register">Registreer een eigen stockroom</a><br>Je sessie verloopt automatisch na 30 minuten.</p>
+<p class="note"><a href="/forgot-password">Wachtwoord vergeten?</a><br>
+Nog geen account? <a href="/register">Registreer een eigen stockroom</a><br>
+Geen verificatiemail ontvangen? <a href="/resend-verification">Opnieuw sturen</a></p>
 """
-    return auth_page("Inloggen", "Open jouw bedrijfsvoorraad.", form, error=error)
+    return auth_page("Inloggen", "Open jouw bedrijfsvoorraad.", body, error, success)
 
 
 def register_page(error=""):
-    form = """
-<form method="post" action="/register" autocomplete="on">
-<label for="name">Naam</label><input id="name" name="name" autocomplete="name" required autofocus>
-<label for="company">Bedrijfsnaam / stockroomnaam</label><input id="company" name="company" required>
-<label for="email">E-mailadres</label><input id="email" name="email" type="email" autocomplete="email" required>
-<label for="password">Wachtwoord</label><input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required>
+    body = """
+<form method="post" action="/register">
+<label>Naam<input name="name" autocomplete="name" required autofocus></label>
+<label>Bedrijfsnaam / stockroomnaam<input name="company" required></label>
+<label>E-mailadres<input name="email" type="email" autocomplete="email" required></label>
+<label>Wachtwoord<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
 <button type="submit">Account en stockroom aanmaken</button></form>
-<p class="note">Elke nieuwe registratie krijgt een volledig eigen stockroom.<br><a href="/login">Al een account? Inloggen</a></p>
+<p class="note">Iedere registratie krijgt een eigen, afgescheiden stockroom.<br><a href="/login">Al een account? Inloggen</a></p>
 """
-    return auth_page("Registreren", "Maak een eigen, afgescheiden stockroom aan.", form, error=error)
+    return auth_page("Registreren", "Maak een eigen stockroom aan.", body, error=error)
+
+
+def forgot_page(success="", error=""):
+    body = """
+<form method="post" action="/forgot-password">
+<label>E-mailadres<input name="email" type="email" autocomplete="email" required autofocus></label>
+<button type="submit">Resetlink aanvragen</button></form>
+<p class="note"><a href="/login">Terug naar inloggen</a></p>
+"""
+    return auth_page("Wachtwoord vergeten", "We sturen een eenmalige resetlink als het account bestaat.", body, error, success)
+
+
+def resend_page(success="", error=""):
+    body = """
+<form method="post" action="/resend-verification">
+<label>E-mailadres<input name="email" type="email" autocomplete="email" required autofocus></label>
+<button type="submit">Verificatiemail opnieuw sturen</button></form>
+<p class="note"><a href="/login">Terug naar inloggen</a></p>
+"""
+    return auth_page("E-mail verifiëren", "Vraag een nieuwe verificatielink aan.", body, error, success)
+
+
+def reset_page(token, error=""):
+    safe = html.escape(token, quote=True)
+    body = f"""
+<form method="post" action="/reset-password">
+<input type="hidden" name="token" value="{safe}">
+<label>Nieuw wachtwoord<input name="password" type="password" minlength="8" autocomplete="new-password" required autofocus></label>
+<label>Herhaal wachtwoord<input name="password2" type="password" minlength="8" autocomplete="new-password" required></label>
+<button type="submit">Wachtwoord wijzigen</button></form>
+"""
+    return auth_page("Nieuw wachtwoord", "Kies minimaal 8 tekens.", body, error=error)
+
+
+def result_page(title, message, link="/login", link_text="Naar inloggen"):
+    return auth_page(title, message, f'<a class="button" href="{html.escape(link, quote=True)}">{html.escape(link_text)}</a>')
 
 
 def members_page(session, memberships, members, error="", success=""):
     can_manage = session["role"] in ("owner", "admin")
-    stockroom_options = "".join(
+    rooms = "".join(
         f'<form method="post" action="/switch-stockroom"><input type="hidden" name="stockroom_id" value="{m["stockroom_id"]}">'
-        f'<button class="{"active" if m["stockroom_id"] == session["stockroom_id"] else ""}" type="submit">'
-        f'{html.escape(m["stockroom_name"])} <small>{html.escape(m["role"])}</small></button></form>'
+        f'<button type="submit">{html.escape(m["stockroom_name"])} ({html.escape(m["role"])})</button></form>'
         for m in memberships
     )
-    member_rows = "".join(
+    rows = "".join(
         f"<tr><td>{html.escape(m['name'])}</td><td>{html.escape(m['email'])}</td><td>{html.escape(m['role'])}</td>"
-        + (f'<td><form method="post" action="/members/remove"><input type="hidden" name="user_id" value="{m["user_id"]}"><button type="submit">Verwijderen</button></form></td>'
-           if can_manage and m["role"] != "owner" and m["user_id"] != session["user_id"] else "<td></td>") + "</tr>"
+        + (
+            f'<td><form method="post" action="/members/remove"><input type="hidden" name="user_id" value="{m["user_id"]}"><button type="submit">Verwijderen</button></form></td>'
+            if can_manage and m["role"] != "owner" and m["user_id"] != session["user_id"]
+            else "<td></td>"
+        )
+        + "</tr>"
         for m in members
     )
     role_options = '<option value="member">Gebruiker</option>'
     if session["role"] == "owner":
         role_options += '<option value="admin">Beheerder</option>'
-    add_form = ""
+    add = ""
     if can_manage:
-        add_form = f"""
-        <section class="panel"><h2>Gebruiker koppelen</h2>
-        <p>De gebruiker moet eerst zelf een account hebben geregistreerd. Koppel daarna diens e-mailadres aan deze stockroom.</p>
-        <form method="post" action="/members/add">
-        <label>E-mailadres<input name="email" type="email" required></label>
-        <label>Rol<select name="role">{role_options}</select></label>
-        <button type="submit">Koppelen</button></form></section>"""
-    feedback = ""
-    if error:
-        feedback = f'<p class="error">{html.escape(error)}</p>'
-    elif success:
-        feedback = f'<p class="success">{html.escape(success)}</p>'
+        add = f"""<section class="panel"><h2>Gebruiker koppelen</h2>
+<form method="post" action="/members/add"><label>E-mailadres<input name="email" type="email" required></label>
+<label>Rol<select name="role">{role_options}</select></label><button type="submit">Koppelen</button></form></section>"""
+    feedback = f'<p class="error">{html.escape(error)}</p>' if error else (f'<p class="success">{html.escape(success)}</p>' if success else "")
     return f"""<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Gebruikers · Stockroom</title><style>
-{AUTH_CSS}
-body{{display:block;padding:28px;background:#f5f6f8}}main{{max-width:980px;margin:0 auto}}.top{{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:24px}}
-.top a{{color:#111827;text-decoration:none;font-weight:700}}.grid{{display:grid;grid-template-columns:280px 1fr;gap:20px}}.panel{{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:22px;margin-bottom:20px}}
-.panel h2{{margin-top:0}}.rooms form{{margin:0 0 8px}}.rooms button{{margin:0;text-align:left;background:#fff;color:#111827;border:1px solid #e5e7eb}}
-.rooms button.active{{background:#111827;color:#fff}}.rooms small{{display:block;opacity:.65;margin-top:2px}}table{{width:100%;border-collapse:collapse}}th,td{{padding:12px 8px;border-bottom:1px solid #eee;text-align:left}}
-td form button{{width:auto;margin:0;padding:8px 10px;background:#fff;color:#991b1b;border:1px solid #fecaca}}@media(max-width:760px){{.grid{{grid-template-columns:1fr}}}}
-</style></head><body><main><div class="top"><div><h1>Gebruikers</h1><p>{html.escape(session["stockroom_name"])}</p></div><div><a href="/">← Dashboard</a> · <a href="/logout">Uitloggen</a></div></div>
-{feedback}<div class="grid"><aside class="panel rooms"><h2>Mijn stockrooms</h2>{stockroom_options}</aside><div>
-<section class="panel"><h2>Toegang</h2><table><thead><tr><th>Naam</th><th>E-mail</th><th>Rol</th><th></th></tr></thead><tbody>{member_rows}</tbody></table></section>
-{add_form}</div></div></main></body></html>"""
+<title>Gebruikers · Stockroom</title><style>{AUTH_CSS}
+body{{display:block}}main{{max-width:1000px;margin:auto}}.grid{{display:grid;grid-template-columns:280px 1fr;gap:20px}}.panel{{background:white;padding:22px;border-radius:16px;margin-bottom:20px}}
+table{{width:100%;border-collapse:collapse}}th,td{{padding:10px;border-bottom:1px solid #eee;text-align:left}}.panel button{{margin-top:8px}}@media(max-width:760px){{.grid{{grid-template-columns:1fr}}}}
+</style></head><body><main><p><a href="/">← Dashboard</a> · <a href="/logout">Uitloggen</a></p><h1>Gebruikers</h1>{feedback}
+<div class="grid"><aside class="panel"><h2>Mijn stockrooms</h2>{rooms}</aside><div>
+<section class="panel"><h2>Toegang tot {html.escape(session["stockroom_name"])}</h2><table><thead><tr><th>Naam</th><th>E-mail</th><th>Rol</th><th></th></tr></thead><tbody>{rows}</tbody></table></section>{add}
+</div></div></main></body></html>"""
 
 
 class StockroomHandler(SimpleHTTPRequestHandler):
@@ -231,6 +323,13 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             self.send_header("Refresh", f"{remaining}; url=/logout")
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def base_url(self):
+        if APP_BASE_URL:
+            return APP_BASE_URL
+        proto = self.headers.get("X-Forwarded-Proto", "http").split(",", 1)[0].strip()
+        host = self.headers.get("Host", "localhost")
+        return f"{proto}://{host}"
 
     def form_data(self, max_bytes=16_384):
         try:
@@ -257,31 +356,22 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         return morsel.value if morsel else None
 
     def current_session(self):
-        token = self.cookie_token()
-        if not token:
+        raw = self.cookie_token()
+        if not raw:
             return None
-        digest = token_digest(token)
         with db() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    s.user_id::text AS user_id,
-                    s.active_stockroom_id::text AS stockroom_id,
-                    EXTRACT(EPOCH FROM s.expires_at) AS expires_at,
-                    u.email,
-                    u.name AS user_name,
-                    r.name AS stockroom_name,
-                    m.role
+            row = conn.execute("""
+                SELECT s.user_id::text user_id,s.active_stockroom_id::text stockroom_id,
+                       EXTRACT(EPOCH FROM s.expires_at) expires_at,u.email,u.name user_name,
+                       r.name stockroom_name,m.role
                 FROM sessions s
                 JOIN users u ON u.id=s.user_id
                 JOIN stockrooms r ON r.id=s.active_stockroom_id
                 JOIN memberships m ON m.user_id=s.user_id AND m.stockroom_id=s.active_stockroom_id
-                WHERE s.token_hash=%s AND s.expires_at > NOW()
-                """,
-                (digest,),
-            ).fetchone()
+                WHERE s.token_hash=%s AND s.expires_at>NOW()
+            """, (token_digest(raw),)).fetchone()
             if not row:
-                conn.execute("DELETE FROM sessions WHERE token_hash=%s", (digest,))
+                conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(raw),))
                 conn.commit()
                 return None
         row["expires_at"] = float(row["expires_at"])
@@ -289,8 +379,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         return row
 
     def secure_request(self):
-        forwarded = self.headers.get("X-Forwarded-Proto", "")
-        return forwarded.split(",", 1)[0].strip().lower() == "https"
+        return self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower() == "https"
 
     def session_cookie_header(self, token, max_age=SESSION_TTL_SECONDS):
         parts = [f"{SESSION_COOKIE}={token}", "Path=/", "HttpOnly", "SameSite=Strict", f"Max-Age={max_age}"]
@@ -344,39 +433,35 @@ class StockroomHandler(SimpleHTTPRequestHandler):
 
     def memberships_for(self, user_id):
         with db() as conn:
-            return conn.execute(
-                """
-                SELECT m.stockroom_id::text, r.name AS stockroom_name, m.role
+            return conn.execute("""
+                SELECT m.stockroom_id::text,r.name stockroom_name,m.role
                 FROM memberships m JOIN stockrooms r ON r.id=m.stockroom_id
                 WHERE m.user_id=%s
-                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, r.name
-                """,
-                (user_id,),
-            ).fetchall()
+                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,r.name
+            """, (user_id,)).fetchall()
 
     def members_for(self, stockroom_id):
         with db() as conn:
-            return conn.execute(
-                """
-                SELECT u.id::text AS user_id, u.name, u.email, m.role
+            return conn.execute("""
+                SELECT u.id::text user_id,u.name,u.email,m.role
                 FROM memberships m JOIN users u ON u.id=m.user_id
                 WHERE m.stockroom_id=%s
-                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.name
-                """,
-                (stockroom_id,),
-            ).fetchall()
+                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,u.name
+            """, (stockroom_id,)).fetchall()
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
         if path == "/health":
             try:
                 with db() as conn:
                     conn.execute("SELECT 1")
-                body = b"healthy\n"
-                self.send_response(200)
+                body, status = b"healthy\n", 200
             except Exception:
-                body = b"unhealthy\n"
-                self.send_response(503)
+                body, status = b"unhealthy\n", 503
+            self.send_response(status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -384,24 +469,45 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/login":
-            if self.current_session():
-                self.redirect("/")
-            else:
-                self.send_html(200, login_page())
+            self.redirect("/") if self.current_session() else self.send_html(200, login_page())
             return
-
         if path == "/register":
-            if self.current_session():
-                self.redirect("/")
-            else:
-                self.send_html(200, register_page())
+            self.redirect("/") if self.current_session() else self.send_html(200, register_page())
             return
-
+        if path == "/forgot-password":
+            self.send_html(200, forgot_page())
+            return
+        if path == "/resend-verification":
+            self.send_html(200, resend_page())
+            return
+        if path == "/reset-password":
+            token = query.get("token", [""])[0]
+            self.send_html(200, reset_page(token) if token else result_page("Ongeldige link", "De resetlink ontbreekt of is ongeldig."))
+            return
+        if path == "/verify-email":
+            raw = query.get("token", [""])[0]
+            if not raw:
+                self.send_html(400, result_page("Ongeldige link", "De verificatielink ontbreekt."))
+                return
+            with db() as conn:
+                row = conn.execute("""
+                    SELECT user_id FROM auth_tokens
+                    WHERE token_hash=%s AND purpose='verify_email' AND used_at IS NULL AND expires_at>NOW()
+                    FOR UPDATE
+                """, (token_digest(raw),)).fetchone()
+                if not row:
+                    self.send_html(400, result_page("Link verlopen", "Deze verificatielink is ongeldig of verlopen.", "/resend-verification", "Nieuwe link aanvragen"))
+                    return
+                conn.execute("UPDATE users SET email_verified_at=NOW() WHERE id=%s", (row["user_id"],))
+                conn.execute("UPDATE auth_tokens SET used_at=NOW() WHERE token_hash=%s", (token_digest(raw),))
+                conn.commit()
+            self.send_html(200, result_page("E-mail geverifieerd", "Je e-mailadres is bevestigd. Je kunt nu inloggen."))
+            return
         if path == "/logout":
-            token = self.cookie_token()
-            if token:
+            raw = self.cookie_token()
+            if raw:
                 with db() as conn:
-                    conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(token),))
+                    conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(raw),))
                     conn.commit()
             self.redirect("/login", clear_cookie=True)
             return
@@ -410,17 +516,14 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         session = self.require_session(api=is_api)
         if not session:
             return
-
         if path == "/api/state":
             with db() as conn:
                 row = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (session["stockroom_id"],)).fetchone()
             self.send_json(200, row["state"] if row else EMPTY_STATE)
             return
-
         if path == "/api/session":
             self.send_json(200, {"expiresAt": session["expires_at"]})
             return
-
         if path == "/api/me":
             self.send_json(200, {
                 "user": {"id": session["user_id"], "name": session["user_name"], "email": session["email"]},
@@ -428,24 +531,17 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                 "stockrooms": self.memberships_for(session["user_id"]),
             })
             return
-
         if path == "/members":
-            self.send_html(200, members_page(
-                session,
-                self.memberships_for(session["user_id"]),
-                self.members_for(session["stockroom_id"]),
-            ))
+            self.send_html(200, members_page(session, self.memberships_for(session["user_id"]), self.members_for(session["stockroom_id"])))
             return
-
         super().do_GET()
 
     def do_HEAD(self):
-        path = urlparse(self.path).path
-        if path == "/health":
+        if urlparse(self.path).path == "/health":
             self.send_response(200)
             self.end_headers()
             return
-        if not self.require_session(api=path.startswith("/api/")):
+        if not self.require_session(api=urlparse(self.path).path.startswith("/api/")):
             return
         super().do_HEAD()
 
@@ -454,7 +550,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
 
         if path == "/login":
             form = self.form_data()
-            if form is None:
+            if not form:
                 self.send_html(400, login_page("Ongeldige aanvraag."))
                 return
             email = form.get("email", [""])[0].strip().lower()
@@ -464,14 +560,13 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                 if not user or not verify_password(password, user["password_salt"], user["password_hash"]):
                     self.send_html(401, login_page("E-mailadres of wachtwoord is onjuist."))
                     return
-                membership = conn.execute(
-                    """
-                    SELECT stockroom_id::text, role FROM memberships WHERE user_id=%s
-                    ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, created_at
-                    LIMIT 1
-                    """,
-                    (user["id"],),
-                ).fetchone()
+                if user["email_verified_at"] is None:
+                    self.send_html(403, login_page("Verifieer eerst je e-mailadres. Je kunt een nieuwe verificatielink aanvragen."))
+                    return
+                membership = conn.execute("""
+                    SELECT stockroom_id::text,role FROM memberships WHERE user_id=%s
+                    ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,created_at LIMIT 1
+                """, (user["id"],)).fetchone()
             if not membership:
                 self.send_html(403, login_page("Dit account heeft geen stockroomtoegang."))
                 return
@@ -481,7 +576,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
 
         if path == "/register":
             form = self.form_data()
-            if form is None:
+            if not form:
                 self.send_html(400, register_page("Ongeldige aanvraag."))
                 return
             name = form.get("name", [""])[0].strip()
@@ -491,29 +586,87 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             if not name or not company or "@" not in email or len(password) < 8:
                 self.send_html(400, register_page("Vul alle velden correct in. Gebruik minimaal 8 tekens voor het wachtwoord."))
                 return
-            user_id = str(uuid.uuid4())
-            stockroom_id = str(uuid.uuid4())
+            user_id, stockroom_id = str(uuid.uuid4()), str(uuid.uuid4())
             salt, digest = hash_password(password)
             try:
                 with db() as conn:
-                    conn.execute(
-                        "INSERT INTO users(id,email,name,password_salt,password_hash) VALUES(%s,%s,%s,%s,%s)",
-                        (user_id, email, name, salt, digest),
-                    )
-                    conn.execute(
-                        "INSERT INTO stockrooms(id,name,created_by,state) VALUES(%s,%s,%s,%s::jsonb)",
-                        (stockroom_id, company, user_id, json.dumps(EMPTY_STATE)),
-                    )
-                    conn.execute(
-                        "INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,'owner')",
-                        (user_id, stockroom_id),
-                    )
+                    conn.execute("""INSERT INTO users(id,email,name,password_salt,password_hash,email_verified_at)
+                                    VALUES(%s,%s,%s,%s,%s,NULL)""", (user_id, email, name, salt, digest))
+                    conn.execute("INSERT INTO stockrooms(id,name,created_by,state) VALUES(%s,%s,%s,%s::jsonb)",
+                                 (stockroom_id, company, user_id, json.dumps(EMPTY_STATE)))
+                    conn.execute("INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,'owner')",
+                                 (user_id, stockroom_id))
                     conn.commit()
             except psycopg.errors.UniqueViolation:
                 self.send_html(409, register_page("Dit e-mailadres is al geregistreerd."))
                 return
-            token, _ = create_session(user_id, stockroom_id)
-            self.redirect("/", token=token)
+            raw = create_auth_token(user_id, "verify_email", VERIFY_TTL_SECONDS)
+            link = f"{self.base_url()}/verify-email?token={raw}"
+            try:
+                send_email(email, "Bevestig je Stockroom-account",
+                           f"Hallo {name},\n\nBevestig je e-mailadres via deze link:\n{link}\n\nDe link is 24 uur geldig.")
+            except Exception as exc:
+                print(f"Verificatiemail verzenden mislukt voor {email}: {exc}")
+                self.send_html(503, result_page("Account aangemaakt", "Je account is aangemaakt, maar de verificatiemail kon niet worden verzonden. Controleer de SMTP-instellingen en vraag daarna een nieuwe verificatielink aan.", "/resend-verification", "Nieuwe verificatielink"))
+                return
+            self.send_html(200, result_page("Controleer je e-mail", "Je account en eigen stockroom zijn aangemaakt. Bevestig eerst je e-mailadres voordat je inlogt."))
+            return
+
+        if path == "/resend-verification":
+            form = self.form_data()
+            email = form.get("email", [""])[0].strip().lower() if form else ""
+            with db() as conn:
+                user = conn.execute("SELECT id,name,email,email_verified_at FROM users WHERE email=%s", (email,)).fetchone()
+            if user and user["email_verified_at"] is None:
+                raw = create_auth_token(str(user["id"]), "verify_email", VERIFY_TTL_SECONDS)
+                link = f"{self.base_url()}/verify-email?token={raw}"
+                try:
+                    send_email(email, "Nieuwe Stockroom-verificatielink",
+                               f"Hallo {user['name']},\n\nBevestig je e-mailadres via:\n{link}\n\nDe link is 24 uur geldig.")
+                except Exception as exc:
+                    print(f"Verificatiemail opnieuw verzenden mislukt voor {email}: {exc}")
+            self.send_html(200, resend_page(success="Als dit account verificatie nodig heeft, is er een nieuwe link verstuurd."))
+            return
+
+        if path == "/forgot-password":
+            form = self.form_data()
+            email = form.get("email", [""])[0].strip().lower() if form else ""
+            with db() as conn:
+                user = conn.execute("SELECT id,name,email FROM users WHERE email=%s", (email,)).fetchone()
+            if user:
+                raw = create_auth_token(str(user["id"]), "reset_password", RESET_TTL_SECONDS)
+                link = f"{self.base_url()}/reset-password?token={raw}"
+                try:
+                    send_email(email, "Stockroom wachtwoord opnieuw instellen",
+                               f"Hallo {user['name']},\n\nStel je wachtwoord opnieuw in via:\n{link}\n\nDe link is 30 minuten geldig.\nHeb je dit niet aangevraagd, negeer deze e-mail.")
+                except Exception as exc:
+                    print(f"Resetmail verzenden mislukt voor {email}: {exc}")
+            self.send_html(200, forgot_page(success="Als dit e-mailadres geregistreerd is, is er een resetlink verstuurd."))
+            return
+
+        if path == "/reset-password":
+            form = self.form_data()
+            raw = form.get("token", [""])[0] if form else ""
+            password = form.get("password", [""])[0] if form else ""
+            password2 = form.get("password2", [""])[0] if form else ""
+            if len(password) < 8 or password != password2:
+                self.send_html(400, reset_page(raw, "Wachtwoorden moeten gelijk zijn en minimaal 8 tekens bevatten."))
+                return
+            salt, digest = hash_password(password)
+            with db() as conn:
+                row = conn.execute("""
+                    SELECT user_id FROM auth_tokens
+                    WHERE token_hash=%s AND purpose='reset_password' AND used_at IS NULL AND expires_at>NOW()
+                    FOR UPDATE
+                """, (token_digest(raw),)).fetchone()
+                if not row:
+                    self.send_html(400, result_page("Link verlopen", "Deze resetlink is ongeldig of verlopen.", "/forgot-password", "Nieuwe resetlink aanvragen"))
+                    return
+                conn.execute("UPDATE users SET password_salt=%s,password_hash=%s WHERE id=%s", (salt, digest, row["user_id"]))
+                conn.execute("UPDATE auth_tokens SET used_at=NOW() WHERE token_hash=%s", (token_digest(raw),))
+                conn.execute("DELETE FROM sessions WHERE user_id=%s", (row["user_id"],))
+                conn.commit()
+            self.send_html(200, result_page("Wachtwoord gewijzigd", "Je wachtwoord is aangepast. Alle bestaande sessies zijn uitgelogd."))
             return
 
         session = self.require_session(api=False)
@@ -524,18 +677,13 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             form = self.form_data()
             stockroom_id = form.get("stockroom_id", [""])[0] if form else ""
             with db() as conn:
-                member = conn.execute(
-                    "SELECT 1 FROM memberships WHERE user_id=%s AND stockroom_id=%s",
-                    (session["user_id"], stockroom_id),
-                ).fetchone()
+                member = conn.execute("SELECT 1 FROM memberships WHERE user_id=%s AND stockroom_id=%s",
+                                      (session["user_id"], stockroom_id)).fetchone()
                 if not member:
                     self.send_error(403)
                     return
-                token = self.cookie_token()
-                conn.execute(
-                    "UPDATE sessions SET active_stockroom_id=%s WHERE token_hash=%s",
-                    (stockroom_id, token_digest(token)),
-                )
+                conn.execute("UPDATE sessions SET active_stockroom_id=%s WHERE token_hash=%s",
+                             (stockroom_id, token_digest(self.cookie_token())))
                 conn.commit()
             self.redirect("/")
             return
@@ -555,13 +703,9 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                 if not user:
                     self.send_html(404, members_page(session, self.memberships_for(session["user_id"]), self.members_for(session["stockroom_id"]), error="Geen geregistreerde gebruiker gevonden met dit e-mailadres."))
                     return
-                conn.execute(
-                    """
-                    INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,%s)
-                    ON CONFLICT (user_id,stockroom_id) DO UPDATE SET role=EXCLUDED.role
-                    """,
-                    (user["id"], session["stockroom_id"], role),
-                )
+                conn.execute("""INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,%s)
+                                ON CONFLICT(user_id,stockroom_id) DO UPDATE SET role=EXCLUDED.role""",
+                             (user["id"], session["stockroom_id"], role))
                 conn.commit()
             self.send_html(200, members_page(session, self.memberships_for(session["user_id"]), self.members_for(session["stockroom_id"]), success="Gebruiker is gekoppeld aan deze stockroom."))
             return
@@ -573,33 +717,24 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             form = self.form_data()
             target_user = form.get("user_id", [""])[0] if form else ""
             with db() as conn:
-                target = conn.execute(
-                    "SELECT role FROM memberships WHERE user_id=%s AND stockroom_id=%s",
-                    (target_user, session["stockroom_id"]),
-                ).fetchone()
-                if not target or target["role"] == "owner" or target_user == session["user_id"]:
+                target = conn.execute("SELECT role FROM memberships WHERE user_id=%s AND stockroom_id=%s",
+                                      (target_user, session["stockroom_id"])).fetchone()
+                if not target or target["role"] == "owner" or target_user == session["user_id"] or (session["role"] == "admin" and target["role"] == "admin"):
                     self.send_error(403)
                     return
-                if session["role"] == "admin" and target["role"] == "admin":
-                    self.send_error(403)
-                    return
-                conn.execute(
-                    "DELETE FROM memberships WHERE user_id=%s AND stockroom_id=%s",
-                    (target_user, session["stockroom_id"]),
-                )
-                conn.execute(
-                    "DELETE FROM sessions WHERE user_id=%s AND active_stockroom_id=%s",
-                    (target_user, session["stockroom_id"]),
-                )
+                conn.execute("DELETE FROM memberships WHERE user_id=%s AND stockroom_id=%s",
+                             (target_user, session["stockroom_id"]))
+                conn.execute("DELETE FROM sessions WHERE user_id=%s AND active_stockroom_id=%s",
+                             (target_user, session["stockroom_id"]))
                 conn.commit()
             self.redirect("/members")
             return
 
         if path == "/logout":
-            token = self.cookie_token()
-            if token:
+            raw = self.cookie_token()
+            if raw:
                 with db() as conn:
-                    conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(token),))
+                    conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(raw),))
                     conn.commit()
             self.redirect("/login", clear_cookie=True)
             return
@@ -630,10 +765,8 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             self.send_json(422, {"error": "Ongeldige voorraadgegevens."})
             return
         with db() as conn:
-            conn.execute(
-                "UPDATE stockrooms SET state=%s::jsonb, updated_at=NOW() WHERE id=%s",
-                (json.dumps(value, ensure_ascii=False), session["stockroom_id"]),
-            )
+            conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",
+                         (json.dumps(value, ensure_ascii=False), session["stockroom_id"]))
             conn.commit()
         self.send_json(200, {"saved": True})
 
@@ -642,8 +775,8 @@ if __name__ == "__main__":
     if not DATABASE_URL:
         raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
     initialize_database()
-    cleanup_sessions()
+    cleanup_expired()
     handler = partial(StockroomHandler, directory=str(PUBLIC_DIR))
     server = ThreadingHTTPServer((HOST, PORT), handler)
-    print(f"Stockroom draait op poort {PORT} met PostgreSQL en {SESSION_TTL_SECONDS // 60} minuten sessies")
+    print(f"Stockroom draait op poort {PORT} met PostgreSQL, e-mailverificatie en {SESSION_TTL_SECONDS // 60} minuten sessies")
     server.serve_forever()
