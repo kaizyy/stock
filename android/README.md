@@ -1,50 +1,73 @@
 # Stockroom Android
 
-Native Android-client voor dezelfde Stockroom-backend en PostgreSQL-data als het webdashboard.
+De Android-app gebruikt de **exacte Stockroom-webinterface** in een beveiligde Android WebView. Daardoor gebruikt Android dezelfde PostgreSQL-data, dezelfde sessies, dezelfde rollen en exact dezelfde functionaliteit als de website. Er is geen tweede voorraad- of rechtenimplementatie meer die kan afwijken.
 
-## Stack
+## Functionaliteit
 
-- Kotlin + Jetpack Compose
+Alles wat op de website beschikbaar is, is ook in de app beschikbaar:
+
+- Overzicht en rolbewuste KPI's
+- Voorraad en artikelen
+- Inkomend en uitgaand
+- Betaling- en leverstatus
+- Archief, herstellen en definitief verwijderen
+- Meerdere stockrooms en wisselen tussen stockrooms
+- Gebruikers en rollen
+- Uitnodigingen per e-mail
+- Categorie, leverancier en minimumvoorraad
+- Voorraadcorrecties
+- Lage-voorraadwaarschuwingen
+- Auditlog
+- Handmatig uitloggen
+- Account permanent verwijderen
+- Dezelfde maximale sessieduur van 30 minuten
+
+Nieuwe webfunctionaliteit wordt automatisch ook Android-functionaliteit zolang die via dezelfde webinterface wordt aangeboden.
+
+## Android-beveiliging
+
+- Alleen HTTPS als Stockroom-basis-URL
+- Cleartext HTTP is uitgeschakeld in het manifest
+- Mixed content wordt geblokkeerd
+- File/content access in WebView is uitgeschakeld
+- SSL-certificaatfouten worden nooit genegeerd
+- Alleen links naar het Stockroom-host blijven in de app; externe links openen in de browser
+- Cookies worden door Android WebView beheerd; de server blijft verantwoordelijk voor sessieverval en autorisatie
+- Safe Browsing is ingeschakeld
+
+## Build
+
 - compileSdk 37
 - targetSdk 36
 - minSdk 26
 - AGP 9.3.0 / Gradle 9.5.0 / JDK 17
-- Compose BOM 2026.08.00
 
-## Backend
+De basis-URL komt uit `STOCKROOM_BASE_URL` en valt terug op:
 
-De app gebruikt dezelfde sessies en rollen als het webdashboard:
-
-- `POST /api/mobile/login`
-- `POST /api/mobile/logout`
-- `POST /api/mobile/switch-stockroom`
-- `GET /api/me`
-- `GET /api/state`
-- `PUT /api/state`
-
-De sessie blijft maximaal 30 minuten geldig, net als op het web. Het sessietoken wordt lokaal alleen gebruikt als cookie voor de Stockroom-API.
-
-## URL instellen
-
-Bouw altijd tegen de publieke HTTPS-URL van jouw Stockroom-installatie:
-
-```bash
-gradle -p android assembleDebug -PSTOCKROOM_BASE_URL=https://stock.jouwdomein.nl
+```text
+https://stock.valerith.nl
 ```
 
-Voor GitHub Actions kun je onder **Repository settings → Secrets and variables → Actions → Variables** de repository variable `STOCKROOM_BASE_URL` instellen.
+## Regressie vóór APK-build
 
-## APK
+De APK-workflow wordt **niet automatisch** uitgevoerd bij een push of pull request. Hij kan alleen handmatig worden gestart.
+
+Voordat Gradle ook maar wordt ingericht of `assembleDebug` start, moet de `preflight`-job slagen. Die controleert:
+
+- Python-syntax van de backend
+- de complete rollenmatrix
+- aanwezigheid van alle belangrijke webfuncties en beheer-API's
+- JavaScript-syntax
+- de optionele voorraadcorrectievelden
+- Android WebView-beveiligingsinstellingen
+- dat automatische APK-builds uitgeschakeld blijven
 
 Workflow: `.github/workflows/android-apk.yml`
 
-De workflow bouwt `android/app/build/outputs/apk/debug/app-debug.apk` en publiceert hem als artifact `stockroom-android-debug`.
+Na een geslaagde preflight bouwt de workflow:
 
-## Rollen
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
 
-De Android-interface gebruikt `/api/me` als bron voor rechten. De backend blijft altijd de definitieve autorisatie uitvoeren.
-
-- Owner/Admin/Gebruiker: volledig operationeel volgens de webrechten.
-- Inkoper: alleen inkomend.
-- Verkoper: alleen uitgaand.
-- Viewer: alleen-lezen.
+en publiceert artifact `stockroom-android-debug` plus release `android-latest`.
