@@ -1,35 +1,55 @@
 # Stockroom
 
-Een lichte voorraadapp voor inkomende en uitgaande artikelen, met prijsregistratie, betaalstatus en leverstatus.
+Multi-tenant voorraadbeheer met PostgreSQL. Iedere nieuwe registratie krijgt een eigen, afgescheiden stockroom. Gebruikers kunnen daarnaast expliciet worden gekoppeld aan een bestaande stockroom met de rollen `owner`, `admin` of `member`.
 
-## Deployen met Coolify
+## Coolify
 
-1. Maak in Coolify een nieuwe resource aan vanuit deze GitHub-repository.
-2. Kies **Dockerfile** als build pack.
-3. Gebruik `Dockerfile` als Dockerfile-locatie en `/` als build context.
-4. Stel containerpoort **8000** in.
-5. Voeg onder **Environment Variables** de volgende verplichte waarden toe:
-   - `STOCKROOM_USERNAME`: de gewenste gebruikersnaam.
-   - `STOCKROOM_PASSWORD`: een sterk, uniek wachtwoord. Markeer deze als secret.
-6. Voeg onder **Persistent Storage** een volume toe met mount path `/data`.
-7. Voeg je domein toe en start de deployment.
+Gebruik de Dockerfile en containerpoort `8000`.
 
-De volledige website, inclusief CSS en JavaScript, is beveiligd met HTTP Basic Authentication. Zonder geldige inloggegevens geeft de webserver geen website-inhoud terug. Alleen `/health` blijft zonder authenticatie beschikbaar voor de technische controle van Coolify; dit endpoint toont uitsluitend `healthy`.
+### Verplicht
 
-De container start bewust niet als een van de twee inlogvariabelen ontbreekt. Voorraad en transacties worden centraal opgeslagen in `/data/stockroom.db`. Zolang `/data` als persistent volume is gekoppeld, blijven de gegevens behouden bij rebuilds, restarts en redeploys. De gegevens zijn bovendien beschikbaar vanaf ieder apparaat dat met de juiste inloggegevens toegang heeft.
+- `DATABASE_URL`: PostgreSQL connection string, bijvoorbeeld `postgresql://user:password@host:5432/stockroom`.
 
-Bij het starten corrigeert de container automatisch de schrijfrechten van het gekoppelde Coolify-volume. De applicatieserver blijft daarna als beperkte gebruiker draaien.
+### E-mailverificatie en wachtwoord resetten
+
+Voor nieuwe registraties en wachtwoord-resetlinks configureer je SMTP:
+
+- `APP_BASE_URL`: publieke HTTPS-URL van Stockroom, bijvoorbeeld `https://stock.example.nl`.
+- `SMTP_HOST`: SMTP-server.
+- `SMTP_PORT`: meestal `587` voor STARTTLS of `465` voor implicit TLS.
+- `SMTP_USERNAME`: SMTP-gebruikersnaam.
+- `SMTP_PASSWORD`: SMTP-wachtwoord; als secret opslaan.
+- `SMTP_FROM`: afzenderadres, bijvoorbeeld `Stockroom <noreply@example.nl>`.
+
+Nieuwe registraties krijgen een verificatielink die 24 uur geldig is. Wachtwoord-resetlinks zijn 30 minuten geldig. Tokens worden alleen gehasht opgeslagen in PostgreSQL. Na een succesvolle wachtwoordreset worden alle bestaande sessies van dat account beëindigd.
+
+Bestaande accounts van vóór de introductie van e-mailverificatie blijven geverifieerd zodat zij niet worden buitengesloten.
+
+## Datamodel
+
+De applicatie maakt bij het starten automatisch de benodigde tabellen aan:
+
+- `users`
+- `stockrooms`
+- `memberships`
+- `sessions`
+- `auth_tokens`
+
+Voorraad- en transactiedata is altijd gekoppeld aan één stockroom. De actieve gebruiker kan alleen data lezen of wijzigen van een stockroom waarvoor een membership bestaat.
 
 ## Lokaal draaien
 
 ```bash
 docker build -t stockroom .
 docker run --rm -p 8080:8000 \
-  -e STOCKROOM_USERNAME=beheerder \
-  -e STOCKROOM_PASSWORD='kies-een-sterk-wachtwoord' \
-  -v stockroom-data:/data \
+  -e DATABASE_URL='postgresql://user:password@host:5432/stockroom' \
+  -e APP_BASE_URL='http://localhost:8080' \
+  -e SMTP_HOST='smtp.example.com' \
+  -e SMTP_PORT='587' \
+  -e SMTP_USERNAME='noreply@example.com' \
+  -e SMTP_PASSWORD='secret' \
+  -e SMTP_FROM='Stockroom <noreply@example.com>' \
   stockroom
 ```
 
 Open daarna `http://localhost:8080`.
-
