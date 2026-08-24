@@ -94,7 +94,10 @@ def check_web_feature_parity() -> None:
         "if (!delta || Number(delta) === 0 || !Number.isFinite(Number(delta)))",
     ], "Optionele voorraadcorrectievelden")
 
-    require(role_dashboard, ["buyer", "seller", "viewer", "permissions"], "Rolbewust dashboard")
+    require(role_dashboard, [
+        'data-dashboard-role="buyer"', 'data-dashboard-role="seller"', 'data-dashboard-role="viewer"',
+        "data?.stockroom?.role", "forceOverviewIfBlocked", "filterActivity",
+    ], "Rolbewust dashboard")
 
     require(dashboard, [
         '"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"',
