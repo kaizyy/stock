@@ -44,7 +44,7 @@ class AppHandler(dashboard.DashboardHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260824-3"></script><script src="/features.js?v=20260824-3"></script><script src="/features_optional_fix.js?v=20260824-3"></script></body>'
+                '<script src="/settings.js?v=20260824-4"></script><script src="/features.js?v=20260824-4"></script><script src="/features_optional_fix.js?v=20260824-4"></script><script src="/role_dashboard.js?v=20260824-4"></script></body>'
             )
             self.send_html(200, content)
             return
@@ -82,5 +82,5 @@ if __name__ == "__main__":
     server.cleanup_expired()
     handler = partial(AppHandler, directory=str(server.PUBLIC_DIR))
     httpd = ThreadingHTTPServer((server.HOST, server.PORT), handler)
-    print("Stockroom draait met gecontroleerde rechtenmatrix en feature UI", flush=True)
+    print("Stockroom draait met gecontroleerde rechtenmatrix en rolbewust dashboard", flush=True)
     httpd.serve_forever()
