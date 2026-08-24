@@ -8,6 +8,7 @@ import smtplib
 import ssl
 import time
 import uuid
+import ipaddress
 from email.message import EmailMessage
 from functools import partial
 from http.cookies import SimpleCookie
@@ -32,6 +33,10 @@ MAX_BODY_BYTES = 1_000_000
 SESSION_TTL_SECONDS = 30 * 60
 VERIFY_TTL_SECONDS = 24 * 60 * 60
 RESET_TTL_SECONDS = 30 * 60
+EMAIL_CHANGE_TTL_SECONDS = 30 * 60
+PASSWORD_SCRYPT_N = int(os.environ.get("PASSWORD_SCRYPT_N", str(2**15)))
+LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_LOCK_SECONDS = int(os.environ.get("LOGIN_LOCK_SECONDS", "900"))
 SESSION_COOKIE = "stockroom_session"
 EMPTY_STATE = {"items": [], "transactions": []}
 
@@ -59,6 +64,9 @@ def initialize_database():
                 )
             """)
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ DEFAULT NOW()")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_version SMALLINT NOT NULL DEFAULT 1")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS stockrooms (
                     id UUID PRIMARY KEY,
@@ -91,7 +99,8 @@ def initialize_database():
                 CREATE TABLE IF NOT EXISTS auth_tokens (
                     token_hash TEXT PRIMARY KEY,
                     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    purpose TEXT NOT NULL CHECK (purpose IN ('verify_email','reset_password')),
+                    purpose TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
                     expires_at TIMESTAMPTZ NOT NULL,
                     used_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -100,22 +109,53 @@ def initialize_database():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_memberships_stockroom_id ON memberships(stockroom_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_purpose ON auth_tokens(user_id,purpose)")
+            cur.execute("ALTER TABLE auth_tokens ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE auth_tokens DROP CONSTRAINT IF EXISTS auth_tokens_purpose_check")
+            cur.execute("ALTER TABLE auth_tokens ADD CONSTRAINT auth_tokens_purpose_check CHECK (purpose IN ('verify_email','reset_password','change_email'))")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS rate_limits (
+                    scope TEXT NOT NULL,
+                    subject_hash TEXT NOT NULL,
+                    window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    attempts INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY(scope,subject_hash)
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,
+                    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                    action TEXT NOT NULL,
+                    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_stockroom_created ON audit_log(stockroom_id,created_at DESC)")
         conn.commit()
 
 
-def hash_password(password, salt=None):
+def hash_password(password, salt=None, n=PASSWORD_SCRYPT_N):
     salt = os.urandom(16) if salt is None else salt
-    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=8, p=1, dklen=32, maxmem=128 * 1024 * 1024)
     return salt, digest
 
 
-def verify_password(password, salt, expected):
-    _, digest = hash_password(password, bytes(salt))
+def verify_password(password, salt, expected, version=1):
+    n = 2**14 if int(version or 1) == 1 else PASSWORD_SCRYPT_N
+    _, digest = hash_password(password, bytes(salt), n=n)
     return hmac.compare_digest(digest, bytes(expected))
 
 
 def token_digest(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def audit_user_action(conn, user_id, action, details=None):
+    conn.execute("""
+        INSERT INTO audit_log(stockroom_id,user_id,action,details)
+        SELECT stockroom_id,%s,%s,%s::jsonb FROM memberships WHERE user_id=%s
+    """, (user_id, action, json.dumps(details or {}), user_id))
 
 
 def valid_state(value):
@@ -147,7 +187,7 @@ def create_session(user_id, stockroom_id):
     return raw, expires_at
 
 
-def create_auth_token(user_id, purpose, ttl_seconds):
+def create_auth_token(user_id, purpose, ttl_seconds, payload=None):
     raw = secrets.token_urlsafe(32)
     with db() as conn:
         conn.execute(
@@ -155,9 +195,9 @@ def create_auth_token(user_id, purpose, ttl_seconds):
             (user_id, purpose),
         )
         conn.execute(
-            """INSERT INTO auth_tokens(token_hash,user_id,purpose,expires_at)
-               VALUES(%s,%s,%s,NOW() + (%s * INTERVAL '1 second'))""",
-            (token_digest(raw), user_id, purpose, ttl_seconds),
+            """INSERT INTO auth_tokens(token_hash,user_id,purpose,expires_at,payload)
+               VALUES(%s,%s,%s,NOW() + (%s * INTERVAL '1 second'),%s::jsonb)""",
+            (token_digest(raw), user_id, purpose, ttl_seconds, json.dumps(payload or {})),
         )
         conn.commit()
     return raw
@@ -175,8 +215,9 @@ def send_email(to_email, subject, text):
     msg.set_content(text)
     context = ssl.create_default_context()
 
-    log_event(f"[EMAIL] Verzenden naar {to_email} | onderwerp={subject!r}")
-    log_event(f"[SMTP] host={SMTP_HOST} port={SMTP_PORT} username={SMTP_USERNAME or '(geen)'} from={SMTP_FROM}")
+    recipient_ref = hashlib.sha256(to_email.lower().encode()).hexdigest()[:12]
+    log_event(f"[EMAIL] Verzenden recipient={recipient_ref} onderwerp={subject!r}")
+    log_event(f"[SMTP] host={SMTP_HOST} port={SMTP_PORT} tls={'implicit' if SMTP_PORT == 465 else 'starttls'}")
 
     try:
         if SMTP_PORT == 465:
@@ -205,15 +246,13 @@ def send_email(to_email, subject, text):
                 smtp.send_message(msg)
                 log_event("[SMTP] Bericht verzonden")
     except smtplib.SMTPAuthenticationError as exc:
-        detail = exc.smtp_error.decode("utf-8", errors="replace") if isinstance(exc.smtp_error, bytes) else str(exc.smtp_error)
-        log_event(f"[SMTP ERROR] Authenticatie mislukt: code={exc.smtp_code} detail={detail}")
+        log_event(f"[SMTP ERROR] Authenticatie mislukt: code={exc.smtp_code}")
         raise
     except smtplib.SMTPResponseException as exc:
-        detail = exc.smtp_error.decode("utf-8", errors="replace") if isinstance(exc.smtp_error, bytes) else str(exc.smtp_error)
-        log_event(f"[SMTP ERROR] Server antwoordde met fout: code={exc.smtp_code} detail={detail}")
+        log_event(f"[SMTP ERROR] Server antwoordde met fout: code={exc.smtp_code}")
         raise
     except (TimeoutError, OSError, ssl.SSLError, smtplib.SMTPException) as exc:
-        log_event(f"[SMTP ERROR] {type(exc).__name__}: {exc}")
+        log_event(f"[SMTP ERROR] {type(exc).__name__}")
         raise
 
 
@@ -413,7 +452,46 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         return row
 
     def secure_request(self):
-        return self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower() == "https"
+        return APP_BASE_URL.startswith("https://") or self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower() == "https"
+
+    def client_subject(self, value=""):
+        forwarded = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+        address = forwarded or self.client_address[0]
+        try:
+            address = str(ipaddress.ip_address(address))
+        except ValueError:
+            address = "invalid"
+        return token_digest(f"{address}|{value.lower()}")
+
+    def enforce_origin(self):
+        """Reject cross-site state changes. SameSite cookies are defense-in-depth, not the CSRF control."""
+        source = self.headers.get("Origin") or self.headers.get("Referer")
+        if not source:
+            # Cookie-authenticated requests must prove they came from our origin.
+            if self.cookie_token():
+                self.send_json(403, {"error": "Aanvraag geblokkeerd door CSRF-beveiliging."})
+                return False
+            return True
+        expected = urlparse(self.base_url())
+        actual = urlparse(source)
+        if (actual.scheme, actual.netloc.lower()) == (expected.scheme, expected.netloc.lower()):
+            return True
+        self.send_json(403, {"error": "Aanvraag geblokkeerd door CSRF-beveiliging."})
+        return False
+
+    def rate_limit(self, scope, value, maximum, window_seconds):
+        subject = self.client_subject(value)
+        with db() as conn:
+            row = conn.execute("""
+                INSERT INTO rate_limits(scope,subject_hash,window_started_at,attempts)
+                VALUES(%s,%s,NOW(),1)
+                ON CONFLICT(scope,subject_hash) DO UPDATE SET
+                  attempts=CASE WHEN rate_limits.window_started_at <= NOW()-(%s*INTERVAL '1 second') THEN 1 ELSE rate_limits.attempts+1 END,
+                  window_started_at=CASE WHEN rate_limits.window_started_at <= NOW()-(%s*INTERVAL '1 second') THEN NOW() ELSE rate_limits.window_started_at END
+                RETURNING attempts
+            """, (scope, subject, window_seconds, window_seconds)).fetchone()
+            conn.commit()
+        return row["attempts"] <= maximum
 
     def session_cookie_header(self, token, max_age=SESSION_TTL_SECONDS):
         parts = [f"{SESSION_COOKIE}={token}", "Path=/", "HttpOnly", "SameSite=Strict", f"Max-Age={max_age}"]
@@ -525,25 +603,38 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                 return
             with db() as conn:
                 row = conn.execute("""
-                    SELECT user_id FROM auth_tokens
-                    WHERE token_hash=%s AND purpose='verify_email' AND used_at IS NULL AND expires_at>NOW()
+                    SELECT user_id,purpose,payload FROM auth_tokens
+                    WHERE token_hash=%s AND purpose IN ('verify_email','change_email') AND used_at IS NULL AND expires_at>NOW()
                     FOR UPDATE
                 """, (token_digest(raw),)).fetchone()
                 if not row:
                     self.send_html(400, result_page("Link verlopen", "Deze verificatielink is ongeldig of verlopen.", "/resend-verification", "Nieuwe link aanvragen"))
                     return
-                conn.execute("UPDATE users SET email_verified_at=NOW() WHERE id=%s", (row["user_id"],))
+                if row["purpose"] == "change_email":
+                    new_email = row["payload"].get("new_email", "").strip().lower()
+                    if not new_email:
+                        self.send_html(400, result_page("Ongeldige link", "Deze e-mailwijziging is ongeldig."))
+                        return
+                    try:
+                        conn.execute("UPDATE users SET email=%s,email_verified_at=NOW() WHERE id=%s", (new_email, row["user_id"]))
+                    except psycopg.errors.UniqueViolation:
+                        self.send_html(409, result_page("E-mailadres bezet", "Dit e-mailadres hoort inmiddels bij een ander account."))
+                        return
+                    conn.execute("DELETE FROM sessions WHERE user_id=%s", (row["user_id"],))
+                    audit_user_action(conn, row["user_id"], "account.email_changed")
+                else:
+                    conn.execute("UPDATE users SET email_verified_at=NOW() WHERE id=%s", (row["user_id"],))
+                    audit_user_action(conn, row["user_id"], "account.email_verified")
                 conn.execute("UPDATE auth_tokens SET used_at=NOW() WHERE token_hash=%s", (token_digest(raw),))
                 conn.commit()
-            self.send_html(200, result_page("E-mail geverifieerd", "Je e-mailadres is bevestigd. Je kunt nu inloggen."))
+            message = "Je nieuwe e-mailadres is bevestigd. Alle apparaten zijn uitgelogd." if row["purpose"] == "change_email" else "Je e-mailadres is bevestigd. Je kunt nu inloggen."
+            self.send_html(200, result_page("E-mail geverifieerd", message))
             return
         if path == "/logout":
-            raw = self.cookie_token()
-            if raw:
-                with db() as conn:
-                    conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(raw),))
-                    conn.commit()
-            self.redirect("/login", clear_cookie=True)
+            if not self.current_session():
+                self.redirect("/login", clear_cookie=True)
+            else:
+                self.send_html(200, auth_page("Uitloggen", "Bevestig dat je deze sessie wilt beëindigen.", '<form method="post" action="/logout"><button type="submit">Uitloggen</button></form>'))
             return
 
         is_api = path.startswith("/api/")
@@ -581,6 +672,8 @@ class StockroomHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self.enforce_origin():
+            return
 
         if path == "/login":
             form = self.form_data()
@@ -589,11 +682,26 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                 return
             email = form.get("email", [""])[0].strip().lower()
             password = form.get("password", [""])[0]
+            if not self.rate_limit("login", email, 10, 900):
+                self.send_html(429, login_page("Te veel inlogpogingen. Probeer het later opnieuw."))
+                return
             with db() as conn:
                 user = conn.execute("SELECT * FROM users WHERE email=%s", (email,)).fetchone()
-                if not user or not verify_password(password, user["password_salt"], user["password_hash"]):
+                locked = user and user["locked_until"] and user["locked_until"].timestamp() > time.time()
+                valid = user and not locked and verify_password(password, user["password_salt"], user["password_hash"], user.get("password_version", 1))
+                if not valid:
+                    if user and not locked:
+                        conn.execute("""UPDATE users SET failed_login_attempts=failed_login_attempts+1,
+                          locked_until=CASE WHEN failed_login_attempts+1 >= %s THEN NOW()+(%s*INTERVAL '1 second') ELSE locked_until END
+                          WHERE id=%s""", (LOGIN_MAX_ATTEMPTS, LOGIN_LOCK_SECONDS, user["id"]))
+                        conn.commit()
                     self.send_html(401, login_page("E-mailadres of wachtwoord is onjuist."))
                     return
+                conn.execute("UPDATE users SET failed_login_attempts=0,locked_until=NULL WHERE id=%s", (user["id"],))
+                if int(user.get("password_version", 1)) < 2:
+                    salt, digest = hash_password(password)
+                    conn.execute("UPDATE users SET password_salt=%s,password_hash=%s,password_version=2 WHERE id=%s", (salt, digest, user["id"]))
+                conn.commit()
                 if user["email_verified_at"] is None:
                     self.send_html(403, login_page("Verifieer eerst je e-mailadres. Je kunt een nieuwe verificatielink aanvragen."))
                     return
@@ -601,6 +709,9 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                     SELECT stockroom_id::text,role FROM memberships WHERE user_id=%s
                     ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,created_at LIMIT 1
                 """, (user["id"],)).fetchone()
+                if membership:
+                    audit_user_action(conn, user["id"], "account.login")
+                    conn.commit()
             if not membership:
                 self.send_html(403, login_page("Dit account heeft geen stockroomtoegang."))
                 return
@@ -617,6 +728,9 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             company = form.get("company", [""])[0].strip()
             email = form.get("email", [""])[0].strip().lower()
             password = form.get("password", [""])[0]
+            if not self.rate_limit("register", email, 5, 3600):
+                self.send_html(429, register_page("Te veel registratiepogingen. Probeer het later opnieuw."))
+                return
             if not name or not company or "@" not in email or len(password) < 8:
                 self.send_html(400, register_page("Vul alle velden correct in. Gebruik minimaal 8 tekens voor het wachtwoord."))
                 return
@@ -624,8 +738,8 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             salt, digest = hash_password(password)
             try:
                 with db() as conn:
-                    conn.execute("""INSERT INTO users(id,email,name,password_salt,password_hash,email_verified_at)
-                                    VALUES(%s,%s,%s,%s,%s,NULL)""", (user_id, email, name, salt, digest))
+                    conn.execute("""INSERT INTO users(id,email,name,password_salt,password_hash,password_version,email_verified_at)
+                                    VALUES(%s,%s,%s,%s,%s,2,NULL)""", (user_id, email, name, salt, digest))
                     conn.execute("INSERT INTO stockrooms(id,name,created_by,state) VALUES(%s,%s,%s,%s::jsonb)",
                                  (stockroom_id, company, user_id, json.dumps(EMPTY_STATE)))
                     conn.execute("INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,'owner')",
@@ -649,6 +763,9 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         if path == "/resend-verification":
             form = self.form_data()
             email = form.get("email", [""])[0].strip().lower() if form else ""
+            if not self.rate_limit("resend", email, 3, 3600):
+                self.send_html(200, resend_page(success="Als dit account verificatie nodig heeft, is er een nieuwe link verstuurd."))
+                return
             with db() as conn:
                 user = conn.execute("SELECT id,name,email,email_verified_at FROM users WHERE email=%s", (email,)).fetchone()
             if user and user["email_verified_at"] is None:
@@ -665,6 +782,9 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         if path == "/forgot-password":
             form = self.form_data()
             email = form.get("email", [""])[0].strip().lower() if form else ""
+            if not self.rate_limit("forgot", email, 5, 3600):
+                self.send_html(200, forgot_page(success="Als dit e-mailadres geregistreerd is, is er een resetlink verstuurd."))
+                return
             with db() as conn:
                 user = conn.execute("SELECT id,name,email FROM users WHERE email=%s", (email,)).fetchone()
             if user:
@@ -683,6 +803,9 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             raw = form.get("token", [""])[0] if form else ""
             password = form.get("password", [""])[0] if form else ""
             password2 = form.get("password2", [""])[0] if form else ""
+            if not self.rate_limit("reset", raw, 5, 900):
+                self.send_html(429, result_page("Te veel pogingen", "Vraag een nieuwe resetlink aan."))
+                return
             if len(password) < 8 or password != password2:
                 self.send_html(400, reset_page(raw, "Wachtwoorden moeten gelijk zijn en minimaal 8 tekens bevatten."))
                 return
@@ -696,9 +819,10 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                 if not row:
                     self.send_html(400, result_page("Link verlopen", "Deze resetlink is ongeldig of verlopen.", "/forgot-password", "Nieuwe resetlink aanvragen"))
                     return
-                conn.execute("UPDATE users SET password_salt=%s,password_hash=%s WHERE id=%s", (salt, digest, row["user_id"]))
+                conn.execute("UPDATE users SET password_salt=%s,password_hash=%s,password_version=2,failed_login_attempts=0,locked_until=NULL WHERE id=%s", (salt, digest, row["user_id"]))
                 conn.execute("UPDATE auth_tokens SET used_at=NOW() WHERE token_hash=%s", (token_digest(raw),))
                 conn.execute("DELETE FROM sessions WHERE user_id=%s", (row["user_id"],))
+                audit_user_action(conn, row["user_id"], "account.password_reset")
                 conn.commit()
             self.send_html(200, result_page("Wachtwoord gewijzigd", "Je wachtwoord is aangepast. Alle bestaande sessies zijn uitgelogd."))
             return
@@ -768,6 +892,7 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             raw = self.cookie_token()
             if raw:
                 with db() as conn:
+                    audit_user_action(conn, session["user_id"], "account.logout")
                     conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(raw),))
                     conn.commit()
             self.redirect("/login", clear_cookie=True)
@@ -776,6 +901,8 @@ class StockroomHandler(SimpleHTTPRequestHandler):
         self.send_error(404)
 
     def do_PUT(self):
+        if not self.enforce_origin():
+            return
         session = self.require_session(api=True)
         if not session:
             return

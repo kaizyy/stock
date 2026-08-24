@@ -3,6 +3,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import server
+from psycopg import sql
 
 ORIGINAL_MEMBERS_PAGE = server.members_page
 ROLE_LABELS = {
@@ -25,7 +26,8 @@ def migrate_roles():
               AND pg_get_constraintdef(oid) LIKE '%role%'
         """).fetchall()
         for row in rows:
-            conn.execute(f'ALTER TABLE memberships DROP CONSTRAINT "{row["conname"]}"')
+            constraint_name = row["conname"].decode() if isinstance(row["conname"], bytes) else row["conname"]
+            conn.execute(sql.SQL("ALTER TABLE memberships DROP CONSTRAINT {}").format(sql.Identifier(constraint_name)))
         conn.execute("ALTER TABLE memberships ADD CONSTRAINT memberships_role_check CHECK (role IN ('owner','admin','member','buyer','seller','viewer'))")
         conn.commit()
 
@@ -112,6 +114,8 @@ class StockroomHandler(server.StockroomHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self.enforce_origin():
+            return
 
         if path == "/account/delete":
             session = self.require_session(api=False)
@@ -124,8 +128,8 @@ class StockroomHandler(server.StockroomHandler):
                 self.send_html(400, account_page(session, "Typ exact VERWIJDEREN om de verwijdering te bevestigen."))
                 return
             with server.db() as conn:
-                user = conn.execute("SELECT password_salt,password_hash FROM users WHERE id=%s", (session["user_id"],)).fetchone()
-                if not user or not server.verify_password(password, user["password_salt"], user["password_hash"]):
+                user = conn.execute("SELECT password_salt,password_hash,password_version FROM users WHERE id=%s", (session["user_id"],)).fetchone()
+                if not user or not server.verify_password(password, user["password_salt"], user["password_hash"], user["password_version"]):
                     self.send_html(403, account_page(session, "Het opgegeven wachtwoord is onjuist."))
                     return
                 owned = conn.execute("SELECT id FROM stockrooms WHERE created_by=%s FOR UPDATE", (session["user_id"],)).fetchall()
@@ -174,6 +178,8 @@ class StockroomHandler(server.StockroomHandler):
         return super().do_POST()
 
     def do_PUT(self):
+        if not self.enforce_origin():
+            return
         session = self.require_session(api=True)
         if not session:
             return

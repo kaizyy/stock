@@ -7,6 +7,21 @@ import runner
 import dashboard_runner as dashboard
 
 
+def security_page(session, message="", error=""):
+    feedback = f'<p class="success">{server.html.escape(message)}</p>' if message else (f'<p class="error">{server.html.escape(error)}</p>' if error else "")
+    return server.auth_page("Accountbeveiliging", f"Ingelogd als {session['email']}", feedback + """
+      <form method="post" action="/account/change-email">
+        <label>Nieuw e-mailadres<input name="email" type="email" autocomplete="email" required></label>
+        <label>Huidig wachtwoord<input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Verificatie naar nieuw adres sturen</button>
+      </form>
+      <form method="post" action="/account/logout-all">
+        <button type="submit">Uitloggen op alle apparaten</button>
+      </form>
+      <p class="note"><a href="/">Terug naar dashboard</a></p>
+    """)
+
+
 def fixed_permissions_for(role):
     return {
         "manageMembers": role in ("owner", "admin"),
@@ -37,6 +52,11 @@ def self_test_permissions():
 class AppHandler(dashboard.DashboardHandler):
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/account/security":
+            session = self.require_session(api=False)
+            if session:
+                self.send_html(200, security_page(session))
+            return
         if path in ("/", "/index.html"):
             session = self.require_session(api=False)
             if not session:
@@ -62,6 +82,48 @@ class AppHandler(dashboard.DashboardHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self.enforce_origin():
+            return
+
+        if path == "/account/logout-all":
+            session = self.require_session(api=False)
+            if not session:
+                return
+            with server.db() as conn:
+                dashboard.audit(conn, session, "account.sessions_revoked", {"scope": "all"})
+                conn.execute("DELETE FROM sessions WHERE user_id=%s", (session["user_id"],))
+                conn.commit()
+            self.redirect("/login", clear_cookie=True)
+            return
+
+        if path == "/account/change-email":
+            session = self.require_session(api=False)
+            if not session:
+                return
+            form = self.form_data()
+            new_email = form.get("email", [""])[0].strip().lower() if form else ""
+            password = form.get("password", [""])[0] if form else ""
+            if "@" not in new_email or not self.rate_limit("change_email", new_email, 3, 3600):
+                self.send_html(400, security_page(session, error="Ongeldig e-mailadres of te veel pogingen."))
+                return
+            with server.db() as conn:
+                user = conn.execute("SELECT password_salt,password_hash,password_version FROM users WHERE id=%s", (session["user_id"],)).fetchone()
+                exists = conn.execute("SELECT 1 FROM users WHERE email=%s AND id<>%s", (new_email, session["user_id"])).fetchone()
+            if exists or not user or not server.verify_password(password, user["password_salt"], user["password_hash"], user["password_version"]):
+                self.send_html(403, security_page(session, error="Wijziging kon niet worden aangevraagd."))
+                return
+            raw = server.create_auth_token(session["user_id"], "change_email", server.EMAIL_CHANGE_TTL_SECONDS, {"new_email": new_email})
+            try:
+                server.send_email(new_email, "Bevestig je nieuwe Stockroom-e-mailadres", f"Bevestig je nieuwe e-mailadres via:\n{self.base_url()}/verify-email?token={raw}\n\nDeze link is 30 minuten geldig en eenmalig bruikbaar.")
+            except Exception as exc:
+                server.log_event(f"[EMAIL ERROR] E-mailwijziging verzenden mislukt: {type(exc).__name__}")
+                self.send_html(503, security_page(session, error="De verificatiemail kon niet worden verzonden. Probeer het later opnieuw."))
+                return
+            with server.db() as conn:
+                dashboard.audit(conn, session, "account.email_change_requested", {"newEmailHash": server.token_digest(new_email)})
+                conn.commit()
+            self.send_html(200, security_page(session, message="Controleer het nieuwe e-mailadres om de wijziging te bevestigen."))
+            return
 
         if path == "/api/mobile/login":
             form = self.form_data()
@@ -70,12 +132,16 @@ class AppHandler(dashboard.DashboardHandler):
             if not email or not password:
                 self.send_json(400, {"error": "E-mailadres en wachtwoord zijn verplicht."})
                 return
+            if not self.rate_limit("mobile_login", email, 10, 900):
+                self.send_json(429, {"error": "Te veel inlogpogingen. Probeer het later opnieuw."})
+                return
             with server.db() as conn:
                 user = conn.execute(
-                    "SELECT id::text,email,name,password_salt,password_hash,email_verified_at FROM users WHERE email=%s",
+                    "SELECT id::text,email,name,password_salt,password_hash,password_version,email_verified_at,locked_until FROM users WHERE email=%s",
                     (email,),
                 ).fetchone()
-            if not user or not server.verify_password(password, user["password_salt"], user["password_hash"]):
+            locked = user and user["locked_until"] and user["locked_until"].timestamp() > server.time.time()
+            if not user or locked or not server.verify_password(password, user["password_salt"], user["password_hash"], user["password_version"]):
                 self.send_json(403, {"error": "E-mailadres of wachtwoord is onjuist."})
                 return
             if not user["email_verified_at"]:

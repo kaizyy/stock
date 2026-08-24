@@ -79,6 +79,7 @@
         <article class="settings-panel">
           <h3>Mijn account</h3>
           <div class="account-summary"><strong id="settingsUserName">—</strong><span id="settingsUserEmail">—</span><span id="settingsStockroomName">—</span></div>
+          <a class="button ghost" href="/account/security" style="text-decoration:none;text-align:center">E-mail en actieve sessies</a>
           <a class="button ghost" href="/logout" style="text-decoration:none;text-align:center">Uitloggen</a>
         </article>
         <article class="settings-panel danger-zone">

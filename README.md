@@ -20,10 +20,18 @@ Voor nieuwe registraties en wachtwoord-resetlinks configureer je SMTP:
 - `SMTP_USERNAME`: SMTP-gebruikersnaam.
 - `SMTP_PASSWORD`: SMTP-wachtwoord; als secret opslaan.
 - `SMTP_FROM`: afzenderadres, bijvoorbeeld `Stockroom <noreply@example.nl>`.
+- `PASSWORD_SCRYPT_N`: optioneel, standaard `32768`; alleen verhogen na een geheugentest op de productiecontainer.
+- `LOGIN_MAX_ATTEMPTS`: optioneel, standaard `5` mislukte pogingen.
+- `LOGIN_LOCK_SECONDS`: optioneel, standaard `900` seconden.
 
 Nieuwe registraties krijgen een verificatielink die 24 uur geldig is. Wachtwoord-resetlinks zijn 30 minuten geldig. Tokens worden alleen gehasht opgeslagen in PostgreSQL. Na een succesvolle wachtwoordreset worden alle bestaande sessies van dat account beëindigd.
 
 Bestaande accounts van vóór de introductie van e-mailverificatie blijven geverifieerd zodat zij niet worden buitengesloten.
+Oude wachtwoordhashes blijven werken en worden na een succesvolle login automatisch naar de sterkere instelling gemigreerd. Via `/account/security` kan een gebruiker een nieuw e-mailadres verifiëren of alle server-side sessies intrekken.
+
+## Backups
+
+Zie [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) voor dagelijkse Coolify/Hetzner-backups, off-site opslag, restore en de verplichte periodieke restore-verificatietest.
 
 ## Android-app
 

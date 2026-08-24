@@ -280,6 +280,8 @@ class DashboardHandler(runner.StockroomHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self.enforce_origin():
+            return
 
         if path == "/invite/login":
             form = self.form_data()
@@ -291,8 +293,8 @@ class DashboardHandler(runner.StockroomHandler):
                 self.send_html(400, server.result_page("Uitnodiging ongeldig", "Deze uitnodiging is verlopen of al gebruikt."))
                 return
             with server.db() as conn:
-                user = conn.execute("SELECT id,email,password_salt,password_hash FROM users WHERE email=%s", (email,)).fetchone()
-            if not user or not server.verify_password(password, user["password_salt"], user["password_hash"]):
+                user = conn.execute("SELECT id,email,password_salt,password_hash,password_version FROM users WHERE email=%s", (email,)).fetchone()
+            if not self.rate_limit("invite_login", email, 10, 900) or not user or not server.verify_password(password, user["password_salt"], user["password_hash"], user["password_version"]):
                 self.send_html(403, invite_page(token, invitation, "E-mailadres of wachtwoord is onjuist."))
                 return
             room_id = self.accept_invitation(token, user["id"], user["email"])
@@ -320,7 +322,7 @@ class DashboardHandler(runner.StockroomHandler):
             user_id = uuid.uuid4()
             try:
                 with server.db() as conn:
-                    conn.execute("INSERT INTO users(id,email,name,password_salt,password_hash,email_verified_at) VALUES(%s,%s,%s,%s,%s,NOW())", (user_id, email, name, salt, digest))
+                    conn.execute("INSERT INTO users(id,email,name,password_salt,password_hash,password_version,email_verified_at) VALUES(%s,%s,%s,%s,%s,2,NOW())", (user_id, email, name, salt, digest))
                     conn.commit()
             except Exception:
                 self.send_html(409, invite_page(token, invitation, "Er bestaat al een account met dit e-mailadres. Gebruik hierboven Inloggen."))
@@ -478,6 +480,8 @@ class DashboardHandler(runner.StockroomHandler):
         return super().do_POST()
 
     def do_PUT(self):
+        if not self.enforce_origin():
+            return
         if urlparse(self.path).path != "/api/state":
             return super().do_PUT()
         session = self.require_session(api=True)

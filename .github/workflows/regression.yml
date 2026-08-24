@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - android-parity
+      - main
     paths:
       - 'server.py'
       - 'runner.py'
@@ -16,34 +16,57 @@ on:
       - 'features.js'
       - 'features_optional_fix.js'
       - 'role_dashboard.js'
-      - 'android/**'
       - 'tools/regression_check.py'
-      - '.github/workflows/android-apk.yml'
+      - 'tools/**'
+      - 'tests/**'
+      - 'docs/**'
+      - 'Dockerfile'
       - '.github/workflows/regression.yml'
 
 jobs:
   regression:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: stockroom
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: stockroom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stockroom -d stockroom_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Record regression run id
+      - name: Install test dependencies
         run: |
-          mkdir -p .ci
-          printf '%s\n' "$GITHUB_RUN_ID" > .ci/regression-latest-run.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .ci/regression-latest-run.txt
-          git commit -m "ci: record regression run $GITHUB_RUN_ID" || true
-          git push || true
+          python -m pip install "psycopg[binary]>=3.2,<4"
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
 
       - name: Python syntax and regression checks
         run: |
-          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py tools/regression_check.py
+          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py tools/regression_check.py tests/test_security.py tests/test_tenant_isolation.py
           python tools/regression_check.py
+          python -m unittest discover -s tests -v
+        env:
+          TEST_DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_test
+
+      - name: Backup and restore verification
+        run: |
+          createdb --host=localhost --username=stockroom stockroom_restore
+          backup=$(BACKUP_DIR="$RUNNER_TEMP/backups" tools/backup-postgres.sh)
+          tools/verify-restore.sh "$backup"
+        env:
+          PGPASSWORD: test-password
+          DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_test
+          RESTORE_DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_restore
 
       - name: JavaScript syntax checks
         run: |
