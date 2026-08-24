@@ -2,29 +2,15 @@ name: Android APK
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/build-android-trigger'
 
 jobs:
   preflight:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
-      - name: Record run id
-        run: |
-          mkdir -p .ci
-          printf '%s\n' "$GITHUB_RUN_ID" > .ci/android-latest-run.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .ci/android-latest-run.txt
-          git commit -m "ci: record Android APK run $GITHUB_RUN_ID" || true
-          git push || true
 
       - name: Python syntax and regression checks
         run: |
@@ -77,4 +63,4 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk stockroom-debug.apk
           gh release delete android-latest --yes --cleanup-tag || true
-          gh release create android-latest stockroom-debug.apk --title "Stockroom Android latest" --notes "Gebouwde debug-APK na geslaagde regressiechecks."
+          gh release create android-latest stockroom-debug.apk --title "Stockroom Android latest" --notes "Handmatig gebouwde debug-APK na geslaagde regressiechecks."
