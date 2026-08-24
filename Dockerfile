@@ -6,7 +6,7 @@ RUN apk add --no-cache curl su-exec \
     && pip install --no-cache-dir "psycopg[binary]>=3.2,<4"
 
 COPY server.py runner.py dashboard_runner.py app_runner.py /app/
-COPY index.html styles.css app.js settings.js features.js features_optional_fix.js /app/public/
+COPY index.html styles.css app.js settings.js features.js features_optional_fix.js role_dashboard.js /app/public/
 COPY docker-entrypoint.sh /usr/local/bin/stockroom-entrypoint
 
 RUN addgroup -S stockroom && adduser -S stockroom -G stockroom \
