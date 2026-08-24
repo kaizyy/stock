@@ -1,0 +1,54 @@
+name: Regression Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-parity
+    paths:
+      - 'server.py'
+      - 'runner.py'
+      - 'dashboard_runner.py'
+      - 'app_runner.py'
+      - 'index.html'
+      - 'app.js'
+      - 'settings.js'
+      - 'features.js'
+      - 'features_optional_fix.js'
+      - 'role_dashboard.js'
+      - 'android/**'
+      - 'tools/regression_check.py'
+      - '.github/workflows/android-apk.yml'
+      - '.github/workflows/regression.yml'
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Record regression run id
+        run: |
+          mkdir -p .ci
+          printf '%s\n' "$GITHUB_RUN_ID" > .ci/regression-latest-run.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .ci/regression-latest-run.txt
+          git commit -m "ci: record regression run $GITHUB_RUN_ID" || true
+          git push || true
+
+      - name: Python syntax and regression checks
+        run: |
+          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py tools/regression_check.py
+          python tools/regression_check.py
+
+      - name: JavaScript syntax checks
+        run: |
+          node --check app.js
+          node --check settings.js
+          node --check features.js
+          node --check features_optional_fix.js
+          node --check role_dashboard.js
