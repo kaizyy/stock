@@ -12,6 +12,7 @@ on:
       - 'app_runner.py'
       - 'index.html'
       - 'app.js'
+      - 'dashboard_metrics.js'
       - 'settings.js'
       - 'features.js'
       - 'features_optional_fix.js'
@@ -71,7 +72,9 @@ jobs:
       - name: JavaScript syntax checks
         run: |
           node --check app.js
+          node --check dashboard_metrics.js
           node --check settings.js
           node --check features.js
           node --check features_optional_fix.js
           node --check role_dashboard.js
+          node tests/dashboard_metrics.test.js
