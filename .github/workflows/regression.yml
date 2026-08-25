@@ -17,6 +17,9 @@ on:
       - 'features.js'
       - 'features_optional_fix.js'
       - 'role_dashboard.js'
+      - 'average_sale_price.js'
+      - 'analytics_dashboard.js'
+      - 'inventory_intelligence.js'
       - 'tools/regression_check.py'
       - 'tools/**'
       - 'tests/**'
@@ -77,4 +80,7 @@ jobs:
           node --check features.js
           node --check features_optional_fix.js
           node --check role_dashboard.js
+          node --check average_sale_price.js
+          node --check analytics_dashboard.js
+          node --check inventory_intelligence.js
           node tests/dashboard_metrics.test.js
