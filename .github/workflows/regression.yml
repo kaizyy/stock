@@ -24,6 +24,7 @@ on:
       - 'inventory_intelligence.js'
       - 'barcode_scanner_fallback.js'
       - 'crm_orders.js'
+      - 'dynamic_navigation.js'
       - 'tools/regression_check.py'
       - 'tools/**'
       - 'tests/**'
@@ -89,4 +90,5 @@ jobs:
           node --check inventory_intelligence.js
           node --check barcode_scanner_fallback.js
           node --check crm_orders.js
+          node --check dynamic_navigation.js
           node tests/dashboard_metrics.test.js
