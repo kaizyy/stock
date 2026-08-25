@@ -96,10 +96,7 @@ class ExtendedHandler(app_runner.AppHandler):
                     if order_type not in ("purchase", "sales") or not orders.allowed(session["role"], capability):
                         self.send_json(403, {"error": "Geen rechten voor dit ordertype."})
                         return
-                    actual_type = orders.update_order_status(session, values)
-                    if actual_type != order_type:
-                        self.send_json(400, {"error": "Ordertype komt niet overeen."})
-                        return
+                    orders.update_order_status(session, order_type, values)
                     self.send_json(200, {"updated": True})
                     return
             except ValueError as exc:
