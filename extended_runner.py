@@ -1,5 +1,6 @@
 from functools import partial
-from http.server import ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import time
 from urllib.parse import parse_qs, urlparse
 
 import server
@@ -15,6 +16,19 @@ def flat_form(handler):
 
 
 class ExtendedHandler(app_runner.AppHandler):
+    def end_headers(self):
+        # Override the legacy server policy that blocked camera=().
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'self'")
+        if self.command == "GET" and urlparse(self.path).path in ("/", "/index.html") and self.session:
+            remaining = max(1, int(self.session["expires_at"] - time.time()))
+            self.send_header("Refresh", f"{remaining}; url=/logout")
+            self.send_header("Cache-Control", "no-store")
+        SimpleHTTPRequestHandler.end_headers(self)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -25,7 +39,7 @@ class ExtendedHandler(app_runner.AppHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260825-6"></script><script src="/features.js?v=20260825-6"></script><script src="/features_optional_fix.js?v=20260825-6"></script><script src="/role_dashboard.js?v=20260825-6"></script><script src="/average_sale_price.js?v=20260825-6"></script><script src="/analytics_dashboard.js?v=20260825-6"></script><script src="/inventory_intelligence.js?v=20260825-6"></script><script src="/barcode_scanner_fallback.js?v=20260825-6"></script><script src="/crm_orders.js?v=20260825-6"></script><script src="/dynamic_navigation.js?v=20260825-6"></script></body>'
+                '<script src="/settings.js?v=20260825-6"></script><script src="/features.js?v=20260825-6"></script><script src="/features_optional_fix.js?v=20260825-6"></script><script src="/role_dashboard.js?v=20260825-6"></script><script src="/average_sale_price.js?v=20260825-6"></script><script src="/analytics_dashboard.js?v=20260825-6"></script><script src="/inventory_intelligence.js?v=20260825-6"></script><script src="/barcode_scanner_fallback.js?v=20260825-6"></script><script src="/dynamic_navigation.js?v=20260825-6"></script><script src="/crm_orders.js?v=20260825-6"></script></body>'
             )
             self.send_html(200, content)
             return
@@ -119,5 +133,5 @@ if __name__ == "__main__":
     server.cleanup_expired()
     handler = partial(ExtendedHandler, directory=str(server.PUBLIC_DIR))
     httpd = ThreadingHTTPServer((server.HOST, server.PORT), handler)
-    print("Stockroom draait met leveranciers, klanten en orderbeheer", flush=True)
+    print("Stockroom draait met leveranciers, klanten, orderbeheer en camera-permissie", flush=True)
     httpd.serve_forever()
