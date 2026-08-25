@@ -1,0 +1,75 @@
+(() => {
+  const euro = new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'});
+  const esc = v => String(v ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  const roleCan = (role, type, write=false) => {
+    if (['owner','admin','member'].includes(role)) return true;
+    if (role === 'viewer') return !write;
+    if (role === 'buyer') return type === 'supplier' || type === 'purchase';
+    if (role === 'seller') return type === 'customer' || type === 'sales';
+    return false;
+  };
+  let me, state={items:[],transactions:[]}, suppliers=[], customers=[], purchaseOrders=[], salesOrders=[];
+
+  async function api(url, options={}) {
+    const r=await fetch(url,{cache:'no-store',...options});
+    const data=await r.json().catch(()=>({}));
+    if(r.status===401){location.href='/login';throw new Error('session');}
+    if(!r.ok) throw new Error(data.error||'Actie mislukt.');
+    return data;
+  }
+
+  function installUI(){
+    if(document.getElementById('relations')) return;
+    const nav=document.querySelector('.sidebar nav');
+    const main=document.querySelector('main');
+    const footer=main?.querySelector('.site-footer');
+    if(!nav||!main) return;
+    nav.insertAdjacentHTML('beforeend','<button class="nav-item crm-nav" data-view="relations"><span>♙</span>Relaties</button><button class="nav-item crm-nav" data-view="orders"><span>≡</span>Orders</button>');
+    const relations=document.createElement('section'); relations.id='relations'; relations.className='view';
+    relations.innerHTML=`<div class="section-head"><div><p class="eyebrow">Contacten</p><h2>Leveranciers & klanten</h2></div></div><div id="crmMessage"></div><div class="crm-grid"><article class="panel" id="supplierPanel"><div class="panel-head"><div><p class="eyebrow">Inkoop</p><h3>Leveranciers</h3></div></div><form id="supplierForm" class="crm-form"><input name="name" placeholder="Bedrijfsnaam" required><input name="contact_name" placeholder="Contactpersoon"><input name="email" type="email" placeholder="E-mail"><input name="phone" placeholder="Telefoon"><input name="address" placeholder="Adres"><input name="notes" placeholder="Notities"><button class="button primary" type="submit">Leverancier opslaan</button></form><div id="supplierList" class="crm-list"></div></article><article class="panel" id="customerPanel"><div class="panel-head"><div><p class="eyebrow">Verkoop</p><h3>Klanten</h3></div></div><form id="customerForm" class="crm-form"><input name="name" placeholder="Klant / bedrijf" required><input name="contact_name" placeholder="Contactpersoon"><input name="email" type="email" placeholder="E-mail"><input name="phone" placeholder="Telefoon"><input name="address" placeholder="Adres"><input name="notes" placeholder="Notities"><button class="button primary" type="submit">Klant opslaan</button></form><div id="customerList" class="crm-list"></div></article></div>`;
+    const orders=document.createElement('section'); orders.id='orders'; orders.className='view';
+    orders.innerHTML=`<div class="section-head"><div><p class="eyebrow">Orderbeheer</p><h2>Inkoop- & verkooporders</h2></div></div><div class="crm-grid"><article class="panel" id="purchasePanel"><div class="panel-head"><div><p class="eyebrow">Leveranciers</p><h3>Inkooporders</h3></div><button class="button primary" type="button" data-new-order="purchase">＋ Inkooporder</button></div><div id="purchaseOrders" class="order-list"></div></article><article class="panel" id="salesPanel"><div class="panel-head"><div><p class="eyebrow">Klanten</p><h3>Verkooporders</h3></div><button class="button primary" type="button" data-new-order="sales">＋ Verkooporder</button></div><div id="salesOrders" class="order-list"></div></article></div>`;
+    main.insertBefore(relations,footer); main.insertBefore(orders,footer);
+    const dialog=document.createElement('dialog'); dialog.id='orderDialog'; dialog.innerHTML=`<form method="dialog" id="orderForm" class="order-form"><div class="dialog-head"><div><p class="eyebrow">Nieuwe order</p><h2 id="orderDialogTitle">Order</h2></div><button class="icon-button" value="cancel" formnovalidate>×</button></div><input type="hidden" name="order_type" id="orderType"><label>Relatie<select name="relation_id" id="orderRelation"></select></label><div class="field-grid"><label>Referentie<input name="reference" placeholder="Bijv. PO-2026-001"></label><label>Datum<input name="order_date" id="orderDate" type="date"></label></div><label>Notities<input name="notes" placeholder="Optioneel"></label><div class="order-lines-head"><strong>Orderregels</strong><button type="button" class="button ghost" id="addOrderLine">＋ Regel</button></div><div id="orderLines"></div><div class="dialog-actions"><button class="button ghost" value="cancel" formnovalidate>Annuleren</button><button class="button primary" type="submit" value="default">Order opslaan</button></div></form>`; document.body.appendChild(dialog);
+    const style=document.createElement('style'); style.textContent=`.crm-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.crm-form{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:16px}.crm-form input,.order-form input,.order-form select,.order-line select,.order-line input{border:1px solid var(--line);border-radius:9px;padding:9px 10px;font:inherit;min-width:0}.crm-form button{grid-column:1/-1}.crm-list,.order-list{display:grid;gap:9px}.crm-card,.order-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--paper)}.crm-card strong,.order-card strong{display:block}.crm-card small,.order-card small{color:var(--muted)}.order-card-head{display:flex;justify-content:space-between;gap:10px}.order-card select{margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:7px}.order-lines-mini{margin-top:8px;font-size:12px;color:var(--muted)}.order-lines-head{display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px}.order-line{display:grid;grid-template-columns:2fr .7fr 1fr auto;gap:8px;margin-bottom:8px}.order-line button{border:0;background:transparent;font-size:20px;cursor:pointer}.crm-msg{padding:10px 12px;border-radius:10px;margin-bottom:12px;background:#ecfdf5;color:#065f46}.crm-msg.err{background:#fef2f2;color:#991b1b}@media(max-width:900px){.crm-grid{grid-template-columns:1fr}.crm-form{grid-template-columns:1fr}.order-line{grid-template-columns:1fr 1fr}.order-line select{grid-column:1/-1}}`; document.head.appendChild(style);
+  }
+
+  function message(text,error=false){const el=document.getElementById('crmMessage');if(!el)return;el.className=`crm-msg${error?' err':''}`;el.textContent=text;setTimeout(()=>{el.className='';el.textContent='';},4000)}
+  function itemOptions(){return state.items.filter(i=>!i.archived).map(i=>`<option value="${esc(i.id)}" data-name="${esc(i.name)}" data-sku="${esc(i.sku)}" data-buy="${Number(i.buy||0)}" data-sell="${Number(i.sell||0)}">${esc(i.name)} (${esc(i.sku)})</option>`).join('')}
+  function addLine(type){const wrap=document.getElementById('orderLines');const row=document.createElement('div');row.className='order-line';row.innerHTML=`<select class="line-item" required>${itemOptions()}</select><input class="line-qty" type="number" min="0.001" step="0.001" value="1" required><input class="line-price" type="number" min="0" step="0.01" value="0" required><button type="button" class="remove-order-line">×</button>`;wrap.appendChild(row);const select=row.querySelector('.line-item');const update=()=>{const opt=select.selectedOptions[0];row.querySelector('.line-price').value=type==='purchase'?Number(opt?.dataset.buy||0).toFixed(2):Number(opt?.dataset.sell||0).toFixed(2)};select.addEventListener('change',update);update()}
+
+  function renderRelations(kind,rows){const target=document.getElementById(kind==='supplier'?'supplierList':'customerList');target.innerHTML=rows.length?rows.map(r=>`<div class="crm-card"><strong>${esc(r.name)}</strong><small>${esc(r.contact_name||'')}${r.email?` · ${esc(r.email)}`:''}${r.phone?` · ${esc(r.phone)}`:''}</small>${r.address?`<small>${esc(r.address)}</small>`:''}</div>`).join(''):'<small>Nog geen relaties.</small>'}
+  function statuses(type){return type==='purchase'?[['draft','Concept'],['ordered','Besteld'],['partial','Deels ontvangen'],['received','Ontvangen'],['cancelled','Geannuleerd']]:[['draft','Concept'],['processing','In behandeling'],['shipped','Verzonden'],['completed','Afgerond'],['paid','Betaald'],['cancelled','Geannuleerd']]}
+  function renderOrders(type,rows){const target=document.getElementById(type==='purchase'?'purchaseOrders':'salesOrders');const canWrite=roleCan(me.stockroom.role,type,true);target.innerHTML=rows.length?rows.map(o=>`<div class="order-card"><div class="order-card-head"><div><strong>${esc(o.reference||'Order zonder referentie')}</strong><small>${esc(o.relation_name||'Geen relatie')} · ${new Date(o.order_date).toLocaleDateString('nl-NL')}</small></div><strong>${euro.format(o.total||0)}</strong></div><div class="order-lines-mini">${o.lines.map(l=>`${Number(l.quantity)}× ${esc(l.item_name)}`).join(' · ')}</div>${canWrite?`<select data-order-status="${esc(o.id)}" data-order-type="${type}">${statuses(type).map(([v,l])=>`<option value="${v}"${v===o.status?' selected':''}>${l}</option>`).join('')}</select>`:`<small>Status: ${esc(o.status)}</small>`}</div>`).join(''):'<small>Nog geen orders.</small>'}
+
+  async function refresh(){
+    try{
+      me=await api('/api/me'); state=await api('/api/state');
+      const role=me.stockroom.role;
+      document.getElementById('supplierPanel').hidden=!roleCan(role,'supplier'); document.getElementById('customerPanel').hidden=!roleCan(role,'customer');
+      document.getElementById('purchasePanel').hidden=!roleCan(role,'purchase'); document.getElementById('salesPanel').hidden=!roleCan(role,'sales');
+      document.querySelector('[data-view="relations"]').hidden=!(roleCan(role,'supplier')||roleCan(role,'customer')); document.querySelector('[data-view="orders"]').hidden=!(roleCan(role,'purchase')||roleCan(role,'sales'));
+      document.getElementById('supplierForm').hidden=!roleCan(role,'supplier',true);document.getElementById('customerForm').hidden=!roleCan(role,'customer',true);
+      document.querySelector('[data-new-order="purchase"]').hidden=!roleCan(role,'purchase',true);document.querySelector('[data-new-order="sales"]').hidden=!roleCan(role,'sales',true);
+      if(roleCan(role,'supplier')){suppliers=(await api('/api/suppliers')).items;renderRelations('supplier',suppliers)}
+      if(roleCan(role,'customer')){customers=(await api('/api/customers')).items;renderRelations('customer',customers)}
+      if(roleCan(role,'purchase')){purchaseOrders=(await api('/api/orders?type=purchase')).orders;renderOrders('purchase',purchaseOrders)}
+      if(roleCan(role,'sales')){salesOrders=(await api('/api/orders?type=sales')).orders;renderOrders('sales',salesOrders)}
+    }catch(e){if(e.message!=='session')message(e.message,true)}
+  }
+
+  async function saveRelation(form,kind){try{await api(`/api/${kind==='supplier'?'suppliers':'customers'}`,{method:'POST',body:new FormData(form)});form.reset();message(`${kind==='supplier'?'Leverancier':'Klant'} opgeslagen.`);await refresh()}catch(e){message(e.message,true)}}
+  function openOrder(type){const dialog=document.getElementById('orderDialog');document.getElementById('orderType').value=type;document.getElementById('orderDialogTitle').textContent=type==='purchase'?'Nieuwe inkooporder':'Nieuwe verkooporder';const rel=type==='purchase'?suppliers:customers;document.getElementById('orderRelation').innerHTML='<option value="">Geen relatie</option>'+rel.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');document.getElementById('orderDate').value=new Date().toISOString().slice(0,10);document.getElementById('orderLines').innerHTML='';addLine(type);dialog.showModal()}
+
+  document.addEventListener('submit',async e=>{
+    if(e.target.id==='supplierForm'){e.preventDefault();saveRelation(e.target,'supplier');return}
+    if(e.target.id==='customerForm'){e.preventDefault();saveRelation(e.target,'customer');return}
+    if(e.target.id==='orderForm'){
+      e.preventDefault();const form=e.target,type=document.getElementById('orderType').value;const lines=[...document.querySelectorAll('.order-line')].map(row=>{const opt=row.querySelector('.line-item').selectedOptions[0];return{item_id:opt?.value,item_name:opt?.dataset.name,sku:opt?.dataset.sku,quantity:Number(row.querySelector('.line-qty').value),unit_price:Number(row.querySelector('.line-price').value)}});const body=new FormData(form);body.set('order_type',type);body.set('relation_name',document.getElementById('orderRelation').selectedOptions[0]?.textContent||'');body.set('status','draft');body.set('lines_json',JSON.stringify(lines));try{await api('/api/orders',{method:'POST',body});document.getElementById('orderDialog').close();message('Order opgeslagen.');await refresh()}catch(err){message(err.message,true)}
+    }
+  });
+  document.addEventListener('click',e=>{const n=e.target.closest('[data-new-order]');if(n)openOrder(n.dataset.newOrder);if(e.target.id==='addOrderLine')addLine(document.getElementById('orderType').value);if(e.target.closest('.remove-order-line'))e.target.closest('.order-line').remove()});
+  document.addEventListener('change',async e=>{const s=e.target.closest('[data-order-status]');if(!s)return;const body=new FormData();body.set('order_id',s.dataset.orderStatus);body.set('order_type',s.dataset.orderType);body.set('status',s.value);try{await api('/api/orders/status',{method:'POST',body});message('Orderstatus bijgewerkt.');await refresh()}catch(err){message(err.message,true)}});
+
+  installUI(); refresh();
+})();
