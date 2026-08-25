@@ -22,6 +22,7 @@ on:
       - 'average_sale_price.js'
       - 'analytics_dashboard.js'
       - 'inventory_intelligence.js'
+      - 'barcode_scanner_fallback.js'
       - 'crm_orders.js'
       - 'tools/regression_check.py'
       - 'tools/**'
@@ -86,5 +87,6 @@ jobs:
           node --check average_sale_price.js
           node --check analytics_dashboard.js
           node --check inventory_intelligence.js
+          node --check barcode_scanner_fallback.js
           node --check crm_orders.js
           node tests/dashboard_metrics.test.js
