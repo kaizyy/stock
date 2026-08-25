@@ -10,6 +10,7 @@ import app_runner
 import order_management as orders
 import order_delete
 import warehouse_ops as warehouse
+import business_tools
 
 
 def flat_form(handler):
@@ -30,6 +31,14 @@ class ExtendedHandler(app_runner.AppHandler):
             self.send_header("Cache-Control", "no-store")
         SimpleHTTPRequestHandler.end_headers(self)
 
+    def send_pdf(self, data, filename):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Disposition", f'inline; filename="{filename}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -40,7 +49,7 @@ class ExtendedHandler(app_runner.AppHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260825-9"></script><script src="/features.js?v=20260825-9"></script><script src="/features_optional_fix.js?v=20260825-9"></script><script src="/role_dashboard.js?v=20260825-9"></script><script src="/analytics_dashboard.js?v=20260825-9"></script><script src="/inventory_intelligence.js?v=20260825-9"></script><script src="/barcode_scanner_fallback.js?v=20260825-9"></script><script src="/dynamic_navigation.js?v=20260825-9"></script><script src="/crm_orders.js?v=20260825-9"></script><script src="/order_delete_ui.js?v=20260825-9"></script><script src="/warehouse_ops.js?v=20260825-9"></script></body>'
+                '<script src="/settings.js?v=20260825-10"></script><script src="/features.js?v=20260825-10"></script><script src="/features_optional_fix.js?v=20260825-10"></script><script src="/role_dashboard.js?v=20260825-10"></script><script src="/analytics_dashboard.js?v=20260825-10"></script><script src="/inventory_intelligence.js?v=20260825-10"></script><script src="/barcode_scanner_fallback.js?v=20260825-10"></script><script src="/dynamic_navigation.js?v=20260825-10"></script><script src="/crm_orders.js?v=20260825-10"></script><script src="/order_delete_ui.js?v=20260825-10"></script><script src="/warehouse_ops.js?v=20260825-10"></script><script src="/business_tools.js?v=20260825-10"></script></body>'
             )
             self.send_html(200, content)
             return
@@ -70,7 +79,36 @@ class ExtendedHandler(app_runner.AppHandler):
             if not orders.allowed(session["role"], capability):
                 self.send_json(403, {"error": "Geen rechten."})
                 return
-            self.send_json(200, {"orders": orders.order_rows(session["stockroom_id"], order_type)})
+            rows = business_tools.enrich_orders(session["stockroom_id"], orders.order_rows(session["stockroom_id"], order_type))
+            self.send_json(200, {"orders": rows})
+            return
+
+        if path == "/api/search":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            query = parse_qs(parsed.query).get("q", [""])[0]
+            self.send_json(200, {"results": business_tools.search_all(session["stockroom_id"], query)})
+            return
+
+        if path == "/api/documents/order.pdf":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            order_id = parse_qs(parsed.query).get("id", [""])[0]
+            try:
+                data, filename = business_tools.order_pdf(session["stockroom_id"], order_id)
+                self.send_pdf(data, filename)
+            except PermissionError as exc:
+                self.send_json(404, {"error": str(exc)})
+            return
+
+        if path == "/api/documents/inventory.pdf":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            data, filename = business_tools.inventory_pdf(session["stockroom_id"])
+            self.send_pdf(data, filename)
             return
 
         if path == "/api/warehouse":
@@ -121,7 +159,8 @@ class ExtendedHandler(app_runner.AppHandler):
                         self.send_json(403, {"error": "Geen rechten voor dit ordertype."})
                         return
                     order_id = orders.create_order(session, values)
-                    self.send_json(200, {"created": True, "id": order_id})
+                    order_number = business_tools.assign_order_number(order_id, session["stockroom_id"], order_type)
+                    self.send_json(200, {"created": True, "id": order_id, "order_number": order_number})
                     return
 
                 if path == "/api/orders/status":
@@ -171,10 +210,11 @@ if __name__ == "__main__":
     runner.migrate_roles()
     dashboard.initialize_enhancements()
     orders.initialize_order_management()
+    business_tools.initialize_business_tools()
     warehouse.initialize_warehouse_ops()
     app_runner.self_test_permissions()
     server.cleanup_expired()
     handler = partial(ExtendedHandler, directory=str(server.PUBLIC_DIR))
     httpd = ThreadingHTTPServer((server.HOST, server.PORT), handler)
-    print("Stockroom draait met orderbeheer, magazijnprocessen en camera-permissie", flush=True)
+    print("Stockroom draait met orderbeheer, magazijnprocessen, zoekfunctie en PDF-documenten", flush=True)
     httpd.serve_forever()
