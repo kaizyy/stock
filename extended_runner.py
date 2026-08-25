@@ -8,6 +8,7 @@ import runner
 import dashboard_runner as dashboard
 import app_runner
 import order_management as orders
+import order_delete
 import warehouse_ops as warehouse
 
 
@@ -39,7 +40,7 @@ class ExtendedHandler(app_runner.AppHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260825-7"></script><script src="/features.js?v=20260825-7"></script><script src="/features_optional_fix.js?v=20260825-7"></script><script src="/role_dashboard.js?v=20260825-7"></script><script src="/average_sale_price.js?v=20260825-7"></script><script src="/analytics_dashboard.js?v=20260825-7"></script><script src="/inventory_intelligence.js?v=20260825-7"></script><script src="/barcode_scanner_fallback.js?v=20260825-7"></script><script src="/dynamic_navigation.js?v=20260825-7"></script><script src="/crm_orders.js?v=20260825-7"></script><script src="/warehouse_ops.js?v=20260825-7"></script></body>'
+                '<script src="/settings.js?v=20260825-8"></script><script src="/features.js?v=20260825-8"></script><script src="/features_optional_fix.js?v=20260825-8"></script><script src="/role_dashboard.js?v=20260825-8"></script><script src="/analytics_dashboard.js?v=20260825-8"></script><script src="/inventory_intelligence.js?v=20260825-8"></script><script src="/barcode_scanner_fallback.js?v=20260825-8"></script><script src="/dynamic_navigation.js?v=20260825-8"></script><script src="/crm_orders.js?v=20260825-8"></script><script src="/order_delete_ui.js?v=20260825-8"></script><script src="/warehouse_ops.js?v=20260825-8"></script></body>'
             )
             self.send_html(200, content)
             return
@@ -92,7 +93,7 @@ class ExtendedHandler(app_runner.AppHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         handled = {
-            "/api/suppliers", "/api/customers", "/api/orders", "/api/orders/status",
+            "/api/suppliers", "/api/customers", "/api/orders", "/api/orders/status", "/api/orders/delete",
             "/api/warehouse/count", "/api/warehouse/return", "/api/warehouse/transfer",
         }
         if path in handled:
@@ -131,6 +132,15 @@ class ExtendedHandler(app_runner.AppHandler):
                         return
                     orders.update_order_status(session, order_type, values)
                     self.send_json(200, {"updated": True})
+                    return
+
+                if path == "/api/orders/delete":
+                    order_type = values.get("order_type")
+                    capability = "write_purchase" if order_type == "purchase" else "write_sales"
+                    if order_type not in ("purchase", "sales") or not orders.allowed(session["role"], capability):
+                        self.send_json(403, {"error": "Geen rechten om deze order te verwijderen."})
+                        return
+                    self.send_json(200, order_delete.delete_order(session, order_type, values))
                     return
 
                 if path == "/api/warehouse/count":
