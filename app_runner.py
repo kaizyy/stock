@@ -35,7 +35,33 @@ def fixed_permissions_for(role):
     }
 
 
+def fixed_specialized_allowed(role, old_state, new_state):
+    old_items, new_items = dashboard.item_map(old_state), dashboard.item_map(new_state)
+    if set(old_items) != set(new_items):
+        return False
+    if role == "buyer":
+        if dashboard.tx_by_type(old_state, "outgoing") != dashboard.tx_by_type(new_state, "outgoing"):
+            return False
+        frozen = ("id", "name", "sku", "archived", "category", "supplier", "minStock", "barcode")
+        for item_id, old in old_items.items():
+            new = new_items[item_id]
+            if any(old.get(k) != new.get(k) for k in frozen):
+                return False
+        return True
+    if role == "seller":
+        if dashboard.tx_by_type(old_state, "incoming") != dashboard.tx_by_type(new_state, "incoming"):
+            return False
+        frozen = ("id", "name", "sku", "buy", "sell", "archived", "category", "supplier", "minStock", "barcode")
+        for item_id, old in old_items.items():
+            new = new_items[item_id]
+            if any(old.get(k) != new.get(k) for k in frozen):
+                return False
+        return True
+    return False
+
+
 dashboard.permissions_for = fixed_permissions_for
+dashboard.specialized_allowed = fixed_specialized_allowed
 
 
 def self_test_permissions():
@@ -64,7 +90,7 @@ class AppHandler(dashboard.DashboardHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260825-2"></script><script src="/features.js?v=20260825-2"></script><script src="/features_optional_fix.js?v=20260825-2"></script><script src="/role_dashboard.js?v=20260825-2"></script><script src="/average_sale_price.js?v=20260825-2"></script><script src="/analytics_dashboard.js?v=20260825-2"></script></body>'
+                '<script src="/settings.js?v=20260825-3"></script><script src="/features.js?v=20260825-3"></script><script src="/features_optional_fix.js?v=20260825-3"></script><script src="/role_dashboard.js?v=20260825-3"></script><script src="/average_sale_price.js?v=20260825-3"></script><script src="/analytics_dashboard.js?v=20260825-3"></script><script src="/inventory_intelligence.js?v=20260825-3"></script></body>'
             )
             self.send_html(200, content)
             return
