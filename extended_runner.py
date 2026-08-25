@@ -8,6 +8,7 @@ import runner
 import dashboard_runner as dashboard
 import app_runner
 import order_management as orders
+import warehouse_ops as warehouse
 
 
 def flat_form(handler):
@@ -17,7 +18,6 @@ def flat_form(handler):
 
 class ExtendedHandler(app_runner.AppHandler):
     def end_headers(self):
-        # Override the legacy server policy that blocked camera=().
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -39,7 +39,7 @@ class ExtendedHandler(app_runner.AppHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260825-6"></script><script src="/features.js?v=20260825-6"></script><script src="/features_optional_fix.js?v=20260825-6"></script><script src="/role_dashboard.js?v=20260825-6"></script><script src="/average_sale_price.js?v=20260825-6"></script><script src="/analytics_dashboard.js?v=20260825-6"></script><script src="/inventory_intelligence.js?v=20260825-6"></script><script src="/barcode_scanner_fallback.js?v=20260825-6"></script><script src="/dynamic_navigation.js?v=20260825-6"></script><script src="/crm_orders.js?v=20260825-6"></script></body>'
+                '<script src="/settings.js?v=20260825-7"></script><script src="/features.js?v=20260825-7"></script><script src="/features_optional_fix.js?v=20260825-7"></script><script src="/role_dashboard.js?v=20260825-7"></script><script src="/average_sale_price.js?v=20260825-7"></script><script src="/analytics_dashboard.js?v=20260825-7"></script><script src="/inventory_intelligence.js?v=20260825-7"></script><script src="/barcode_scanner_fallback.js?v=20260825-7"></script><script src="/dynamic_navigation.js?v=20260825-7"></script><script src="/crm_orders.js?v=20260825-7"></script><script src="/warehouse_ops.js?v=20260825-7"></script></body>'
             )
             self.send_html(200, content)
             return
@@ -72,11 +72,30 @@ class ExtendedHandler(app_runner.AppHandler):
             self.send_json(200, {"orders": orders.order_rows(session["stockroom_id"], order_type)})
             return
 
+        if path == "/api/warehouse":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            perms = warehouse.permissions(session["role"])
+            if not perms["read"]:
+                self.send_json(403, {"error": "Geen rechten."})
+                return
+            self.send_json(200, {
+                "warehousePermissions": perms,
+                "targets": warehouse.transfer_targets(session["user_id"], session["stockroom_id"]) if perms["transfer"] else [],
+                "history": warehouse.history(session["stockroom_id"]),
+            })
+            return
+
         return super().do_GET()
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path in ("/api/suppliers", "/api/customers", "/api/orders", "/api/orders/status"):
+        handled = {
+            "/api/suppliers", "/api/customers", "/api/orders", "/api/orders/status",
+            "/api/warehouse/count", "/api/warehouse/return", "/api/warehouse/transfer",
+        }
+        if path in handled:
             if not self.enforce_origin():
                 return
             session = self.require_session(api=True)
@@ -113,6 +132,19 @@ class ExtendedHandler(app_runner.AppHandler):
                     orders.update_order_status(session, order_type, values)
                     self.send_json(200, {"updated": True})
                     return
+
+                if path == "/api/warehouse/count":
+                    self.send_json(200, {"updated": True, **warehouse.apply_count(session, values)})
+                    return
+                if path == "/api/warehouse/return":
+                    kind = values.get("return_type")
+                    if kind not in ("sales", "purchase"):
+                        raise ValueError("Retourtype is ongeldig.")
+                    self.send_json(200, {"updated": True, **warehouse.apply_return(session, values, kind)})
+                    return
+                if path == "/api/warehouse/transfer":
+                    self.send_json(200, {"updated": True, **warehouse.apply_transfer(session, values)})
+                    return
             except ValueError as exc:
                 self.send_json(400, {"error": str(exc)})
                 return
@@ -129,9 +161,10 @@ if __name__ == "__main__":
     runner.migrate_roles()
     dashboard.initialize_enhancements()
     orders.initialize_order_management()
+    warehouse.initialize_warehouse_ops()
     app_runner.self_test_permissions()
     server.cleanup_expired()
     handler = partial(ExtendedHandler, directory=str(server.PUBLIC_DIR))
     httpd = ThreadingHTTPServer((server.HOST, server.PORT), handler)
-    print("Stockroom draait met leveranciers, klanten, orderbeheer en camera-permissie", flush=True)
+    print("Stockroom draait met orderbeheer, magazijnprocessen en camera-permissie", flush=True)
     httpd.serve_forever()
