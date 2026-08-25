@@ -125,19 +125,19 @@ def save_relation(session, kind, values):
 
 def order_rows(stockroom_id, order_type):
     with server.db() as conn:
-        orders = conn.execute(
+        rows = conn.execute(
             """SELECT id::text,order_type,relation_id::text,relation_name,status,reference,notes,order_date,created_at,updated_at
                FROM orders WHERE stockroom_id=%s AND order_type=%s ORDER BY order_date DESC,created_at DESC LIMIT 200""",
             (stockroom_id, order_type),
         ).fetchall()
-        for order in orders:
+        for order in rows:
             order["lines"] = conn.execute(
                 """SELECT id::text,item_id,item_name,sku,quantity::float8,unit_price::float8,fulfilled_quantity::float8
                    FROM order_lines WHERE order_id=%s ORDER BY created_at,id""",
                 (order["id"],),
             ).fetchall()
             order["total"] = sum(float(line["quantity"]) * float(line["unit_price"]) for line in order["lines"])
-        return orders
+        return rows
 
 
 def _parse_lines(raw):
@@ -208,13 +208,20 @@ def create_order(session, values):
     return order_id
 
 
-def update_order_status(session, values):
+def update_order_status(session, expected_type, values):
     order_id = (values.get("order_id") or "").strip()
     status = (values.get("status") or "").strip()
+    if expected_type not in ("purchase", "sales"):
+        raise ValueError("Ordertype is ongeldig.")
     with server.db() as conn:
-        row = conn.execute("SELECT order_type,status FROM orders WHERE id=%s AND stockroom_id=%s FOR UPDATE", (order_id, session["stockroom_id"])).fetchone()
+        row = conn.execute(
+            "SELECT order_type,status FROM orders WHERE id=%s AND stockroom_id=%s FOR UPDATE",
+            (order_id, session["stockroom_id"]),
+        ).fetchone()
         if not row:
             raise PermissionError("Order niet gevonden.")
+        if row["order_type"] != expected_type:
+            raise PermissionError("Geen rechten voor dit ordertype.")
         valid = PURCHASE_STATUSES if row["order_type"] == "purchase" else SALES_STATUSES
         if status not in valid:
             raise ValueError("Orderstatus is ongeldig.")
