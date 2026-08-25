@@ -1,12 +1,14 @@
 (() => {
   const titles = {
     overview: 'Overzicht',
+    analytics: 'Analytics',
     inventory: 'Voorraad',
     incoming: 'Inkomend',
     outgoing: 'Uitgaand',
     settings: 'Instellingen',
     relations: 'Relaties',
-    orders: 'Orders'
+    orders: 'Orders',
+    warehouse: 'Magazijn'
   };
 
   function activateView(id) {
@@ -40,10 +42,6 @@
     if (!trigger) return;
     const id = trigger.dataset.view || trigger.dataset.go;
     if (!id || !document.getElementById(id)) return;
-
-    // Existing static navigation may already be handled by app.js. We only
-    // take over when needed; running this again is harmless and keeps dynamic
-    // sections such as Relaties and Orders working.
     event.preventDefault();
     activateView(id);
   });
