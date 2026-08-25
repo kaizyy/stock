@@ -6,7 +6,7 @@ RUN apk add --no-cache curl su-exec postgresql-client \
     && pip install --no-cache-dir "psycopg[binary]>=3.2,<4"
 
 COPY server.py runner.py dashboard_runner.py app_runner.py /app/
-COPY index.html styles.css app.js dashboard_metrics.js settings.js features.js features_optional_fix.js role_dashboard.js average_sale_price.js /app/public/
+COPY index.html styles.css app.js dashboard_metrics.js settings.js features.js features_optional_fix.js role_dashboard.js average_sale_price.js analytics_dashboard.js /app/public/
 COPY docker-entrypoint.sh /usr/local/bin/stockroom-entrypoint
 COPY tools/backup-postgres.sh tools/restore-postgres.sh tools/verify-restore.sh /usr/local/bin/
 
