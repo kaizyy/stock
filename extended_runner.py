@@ -11,6 +11,7 @@ import order_management as orders
 import order_delete
 import warehouse_ops as warehouse
 import business_tools
+import platform_admin
 
 
 def flat_form(handler):
@@ -31,6 +32,33 @@ class ExtendedHandler(app_runner.AppHandler):
             self.send_header("Cache-Control", "no-store")
         SimpleHTTPRequestHandler.end_headers(self)
 
+    def require_session(self, api=False):
+        session = super().require_session(api=api)
+        if not session:
+            return None
+        allowed, message = platform_admin.enforce_access(session)
+        if allowed:
+            return session
+        token = self.cookie_token()
+        if token:
+            with server.db() as conn:
+                conn.execute("DELETE FROM sessions WHERE token_hash=%s", (server.token_digest(token),))
+                conn.commit()
+        if api:
+            self.send_json(403, {"error": message})
+        else:
+            self.send_html(403, server.result_page("Toegang geblokkeerd", message, "/login", "Naar inloggen"))
+        return None
+
+    def require_platform_admin(self):
+        session = self.require_session(api=True)
+        if not session:
+            return None
+        if not platform_admin.is_platform_admin(session):
+            self.send_json(403, {"error": "Alleen platformbeheer heeft toegang tot deze functie."})
+            return None
+        return session
+
     def send_pdf(self, data, filename):
         self.send_response(200)
         self.send_header("Content-Type", "application/pdf")
@@ -49,9 +77,29 @@ class ExtendedHandler(app_runner.AppHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260825-10"></script><script src="/features.js?v=20260825-10"></script><script src="/features_optional_fix.js?v=20260825-10"></script><script src="/role_dashboard.js?v=20260825-10"></script><script src="/analytics_dashboard.js?v=20260825-10"></script><script src="/inventory_intelligence.js?v=20260825-10"></script><script src="/barcode_scanner_fallback.js?v=20260825-10"></script><script src="/dynamic_navigation.js?v=20260825-10"></script><script src="/crm_orders.js?v=20260825-10"></script><script src="/order_delete_ui.js?v=20260825-10"></script><script src="/warehouse_ops.js?v=20260825-10"></script><script src="/business_tools.js?v=20260825-10"></script></body>'
+                '<script src="/settings.js?v=20260825-11"></script><script src="/features.js?v=20260825-11"></script><script src="/features_optional_fix.js?v=20260825-11"></script><script src="/role_dashboard.js?v=20260825-11"></script><script src="/analytics_dashboard.js?v=20260825-11"></script><script src="/inventory_intelligence.js?v=20260825-11"></script><script src="/barcode_scanner_fallback.js?v=20260825-11"></script><script src="/dynamic_navigation.js?v=20260825-11"></script><script src="/crm_orders.js?v=20260825-11"></script><script src="/order_delete_ui.js?v=20260825-11"></script><script src="/warehouse_ops.js?v=20260825-11"></script><script src="/business_tools.js?v=20260825-11"></script><script src="/platform_admin_ui.js?v=20260825-11"></script></body>'
             )
             self.send_html(200, content)
+            return
+
+        if path == "/api/platform-admin/status":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            self.send_json(200, {"platformAdmin": platform_admin.is_platform_admin(session)})
+            return
+
+        if path == "/api/platform-admin":
+            if not self.require_platform_admin():
+                return
+            self.send_json(200, platform_admin.platform_overview())
+            return
+
+        if path == "/api/notifications":
+            session = self.require_session(api=True)
+            if not session:
+                return
+            self.send_json(200, {"notifications": platform_admin.stockroom_notifications(session["stockroom_id"])})
             return
 
         if path in ("/api/suppliers", "/api/customers"):
@@ -101,14 +149,21 @@ class ExtendedHandler(app_runner.AppHandler):
                 self.send_pdf(data, filename)
             except PermissionError as exc:
                 self.send_json(404, {"error": str(exc)})
+            except Exception as exc:
+                platform_admin.record_error("order_pdf", type(exc).__name__, session["stockroom_id"], session["user_id"])
+                self.send_json(500, {"error": "PDF kon niet worden gegenereerd."})
             return
 
         if path == "/api/documents/inventory.pdf":
             session = self.require_session(api=True)
             if not session:
                 return
-            data, filename = business_tools.inventory_pdf(session["stockroom_id"])
-            self.send_pdf(data, filename)
+            try:
+                data, filename = business_tools.inventory_pdf(session["stockroom_id"])
+                self.send_pdf(data, filename)
+            except Exception as exc:
+                platform_admin.record_error("inventory_pdf", type(exc).__name__, session["stockroom_id"], session["user_id"])
+                self.send_json(500, {"error": "PDF kon niet worden gegenereerd."})
             return
 
         if path == "/api/warehouse":
@@ -133,15 +188,27 @@ class ExtendedHandler(app_runner.AppHandler):
         handled = {
             "/api/suppliers", "/api/customers", "/api/orders", "/api/orders/status", "/api/orders/delete",
             "/api/warehouse/count", "/api/warehouse/return", "/api/warehouse/transfer",
+            "/api/platform-admin/suspension",
         }
         if path in handled:
             if not self.enforce_origin():
                 return
-            session = self.require_session(api=True)
+            session = self.require_platform_admin() if path.startswith("/api/platform-admin/") else self.require_session(api=True)
             if not session:
                 return
             values = flat_form(self)
             try:
+                if path == "/api/platform-admin/suspension":
+                    result = platform_admin.set_suspension(
+                        session,
+                        values.get("target_type") or "",
+                        values.get("target_id") or "",
+                        str(values.get("suspended") or "0") == "1",
+                        values.get("reason") or "",
+                    )
+                    self.send_json(200, result)
+                    return
+
                 if path in ("/api/suppliers", "/api/customers"):
                     kind = "supplier" if path.endswith("suppliers") else "customer"
                     capability = "write_suppliers" if kind == "supplier" else "write_customers"
@@ -200,6 +267,10 @@ class ExtendedHandler(app_runner.AppHandler):
             except PermissionError as exc:
                 self.send_json(403, {"error": str(exc)})
                 return
+            except Exception as exc:
+                platform_admin.record_error(path, type(exc).__name__, session.get("stockroom_id"), session.get("user_id"), {"path": path})
+                self.send_json(500, {"error": "Onverwachte serverfout. De fout is geregistreerd."})
+                return
         return super().do_POST()
 
 
@@ -212,9 +283,10 @@ if __name__ == "__main__":
     orders.initialize_order_management()
     business_tools.initialize_business_tools()
     warehouse.initialize_warehouse_ops()
+    platform_admin.initialize_platform_admin()
     app_runner.self_test_permissions()
     server.cleanup_expired()
     handler = partial(ExtendedHandler, directory=str(server.PUBLIC_DIR))
     httpd = ThreadingHTTPServer((server.HOST, server.PORT), handler)
-    print("Stockroom draait met orderbeheer, magazijnprocessen, zoekfunctie en PDF-documenten", flush=True)
+    print("Stockroom draait met platformbeheer, notificaties, monitoring en magazijnprocessen", flush=True)
     httpd.serve_forever()
