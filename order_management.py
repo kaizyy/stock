@@ -51,10 +51,12 @@ def initialize_order_management():
                 notes TEXT NOT NULL DEFAULT '',
                 order_date DATE NOT NULL DEFAULT CURRENT_DATE,
                 created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                inventory_booked_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS inventory_booked_at TIMESTAMPTZ")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_stockroom_type_date ON orders(stockroom_id,order_type,order_date DESC)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS order_lines (
@@ -126,7 +128,8 @@ def save_relation(session, kind, values):
 def order_rows(stockroom_id, order_type):
     with server.db() as conn:
         rows = conn.execute(
-            """SELECT id::text,order_type,relation_id::text,relation_name,status,reference,notes,order_date,created_at,updated_at
+            """SELECT id::text,order_type,relation_id::text,relation_name,status,reference,notes,order_date,
+                      inventory_booked_at,created_at,updated_at
                FROM orders WHERE stockroom_id=%s AND order_type=%s ORDER BY order_date DESC,created_at DESC LIMIT 200""",
             (stockroom_id, order_type),
         ).fetchall()
@@ -208,27 +211,142 @@ def create_order(session, values):
     return order_id
 
 
+def _find_state_item(state, item_id):
+    return next((item for item in state.get("items", []) if str(item.get("id")) == str(item_id)), None)
+
+
+def _book_inventory(conn, session, order, lines, state):
+    order_type = order["order_type"]
+    if order_type == "sales":
+        shortages = []
+        for line in lines:
+            item = _find_state_item(state, line["item_id"])
+            available = float((item or {}).get("stock") or 0)
+            needed = float(line["quantity"])
+            if not item or available < needed:
+                shortages.append(f"{line['item_name']} ({available:g} beschikbaar, {needed:g} nodig)")
+        if shortages:
+            raise ValueError("Onvoldoende voorraad: " + "; ".join(shortages))
+
+    for line in lines:
+        item = _find_state_item(state, line["item_id"])
+        if not item:
+            raise ValueError(f"Artikel bestaat niet meer: {line['item_name']}")
+        qty = float(line["quantity"])
+        price = float(line["unit_price"])
+        if order_type == "purchase":
+            item["stock"] = float(item.get("stock") or 0) + qty
+            item["buy"] = price
+            tx = {
+                "id": str(uuid.uuid4()),
+                "type": "incoming",
+                "itemId": str(line["item_id"]),
+                "qty": qty,
+                "price": price,
+                "salePrice": float(item.get("sell") or 0),
+                "party": order["relation_name"],
+                "done": True,
+                "paid": False,
+                "date": f"{order['order_date']}T12:00:00",
+                "orderId": str(order["id"]),
+            }
+        else:
+            item["stock"] = float(item.get("stock") or 0) - qty
+            tx = {
+                "id": str(uuid.uuid4()),
+                "type": "outgoing",
+                "itemId": str(line["item_id"]),
+                "qty": qty,
+                "price": price,
+                "party": order["relation_name"],
+                "done": False,
+                "date": f"{order['order_date']}T12:00:00",
+                "orderId": str(order["id"]),
+            }
+        state.setdefault("transactions", []).append(tx)
+
+    conn.execute(
+        "UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",
+        (json.dumps(state, ensure_ascii=False), session["stockroom_id"]),
+    )
+    conn.execute(
+        "UPDATE order_lines SET fulfilled_quantity=quantity WHERE order_id=%s",
+        (order["id"],),
+    )
+    conn.execute(
+        "UPDATE orders SET inventory_booked_at=NOW() WHERE id=%s AND inventory_booked_at IS NULL",
+        (order["id"],),
+    )
+    conn.execute(
+        "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
+        (
+            session["stockroom_id"],
+            session["user_id"],
+            f"order.{order_type}.inventory_booked",
+            json.dumps({"id": str(order["id"]), "reference": order["reference"], "lines": len(lines)}),
+        ),
+    )
+
+
 def update_order_status(session, expected_type, values):
     order_id = (values.get("order_id") or "").strip()
     status = (values.get("status") or "").strip()
     if expected_type not in ("purchase", "sales"):
         raise ValueError("Ordertype is ongeldig.")
+
     with server.db() as conn:
-        row = conn.execute(
-            "SELECT order_type,status FROM orders WHERE id=%s AND stockroom_id=%s FOR UPDATE",
+        order = conn.execute(
+            """SELECT id,stockroom_id,order_type,status,reference,relation_name,order_date,inventory_booked_at
+               FROM orders WHERE id=%s AND stockroom_id=%s FOR UPDATE""",
             (order_id, session["stockroom_id"]),
         ).fetchone()
-        if not row:
+        if not order:
             raise PermissionError("Order niet gevonden.")
-        if row["order_type"] != expected_type:
+        if order["order_type"] != expected_type:
             raise PermissionError("Geen rechten voor dit ordertype.")
-        valid = PURCHASE_STATUSES if row["order_type"] == "purchase" else SALES_STATUSES
+
+        valid = PURCHASE_STATUSES if expected_type == "purchase" else SALES_STATUSES
         if status not in valid:
             raise ValueError("Orderstatus is ongeldig.")
+
+        already_booked = order["inventory_booked_at"] is not None
+        if already_booked:
+            if expected_type == "purchase" and status != "received":
+                raise ValueError("Deze inkooporder is al in voorraad geboekt en kan niet meer naar een eerdere status.")
+            if expected_type == "sales" and status not in {"completed", "paid"}:
+                raise ValueError("Deze verkooporder is al uit voorraad geboekt en kan niet meer naar een eerdere status.")
+
+        should_book = (
+            not already_booked
+            and ((expected_type == "purchase" and status == "received") or (expected_type == "sales" and status == "completed"))
+        )
+
+        if should_book:
+            room = conn.execute(
+                "SELECT state FROM stockrooms WHERE id=%s FOR UPDATE",
+                (session["stockroom_id"],),
+            ).fetchone()
+            if not room:
+                raise PermissionError("Stockroom niet gevonden.")
+            lines = conn.execute(
+                """SELECT item_id,item_name,sku,quantity::float8,unit_price::float8
+                   FROM order_lines WHERE order_id=%s ORDER BY created_at,id""",
+                (order_id,),
+            ).fetchall()
+            if not lines:
+                raise ValueError("Order bevat geen orderregels.")
+            state = room["state"] or {"items": [], "transactions": []}
+            _book_inventory(conn, session, order, lines, state)
+
         conn.execute("UPDATE orders SET status=%s,updated_at=NOW() WHERE id=%s", (status, order_id))
         conn.execute(
             "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
-            (session["stockroom_id"], session["user_id"], "order.status_changed", json.dumps({"id": order_id, "from": row["status"], "to": status, "type": row["order_type"]})),
+            (
+                session["stockroom_id"],
+                session["user_id"],
+                "order.status_changed",
+                json.dumps({"id": order_id, "from": order["status"], "to": status, "type": expected_type, "inventoryBooked": should_book}),
+            ),
         )
         conn.commit()
-    return row["order_type"]
+    return expected_type
