@@ -19,11 +19,45 @@
     return !Number.isNaN(date.getTime()) && date >= since;
   }
 
+  function ensureAnalyticsView() {
+    let view = document.getElementById('analytics');
+    if (!view) {
+      view = document.createElement('section');
+      view.id = 'analytics';
+      view.className = 'view';
+      view.innerHTML = '<div class="section-head"><div><p class="eyebrow">Inzichten en prestaties</p><h2>Analytics</h2></div></div><div id="analyticsContent"></div>';
+      const outgoing = document.getElementById('outgoing');
+      outgoing?.insertAdjacentElement('afterend', view);
+    }
+
+    const nav = document.querySelector('.sidebar nav');
+    if (nav && !nav.querySelector('[data-view="analytics"]')) {
+      const button = document.createElement('button');
+      button.className = 'nav-item';
+      button.dataset.view = 'analytics';
+      button.innerHTML = '<span>◫</span>Analytics';
+      const inventoryButton = nav.querySelector('[data-view="inventory"]');
+      if (inventoryButton) inventoryButton.insertAdjacentElement('beforebegin', button);
+      else nav.appendChild(button);
+    }
+
+    const content = view.querySelector('#analyticsContent');
+    const revenueMetric = document.querySelector('#overview .revenue-metric');
+    const chartPanel = document.querySelector('#overview .chart-panel');
+    if (revenueMetric && !content.querySelector('.analytics-existing-metrics')) {
+      const row = document.createElement('div');
+      row.className = 'analytics-existing-metrics';
+      content.appendChild(row);
+      row.appendChild(revenueMetric);
+    }
+    if (chartPanel && chartPanel.parentElement !== content) content.appendChild(chartPanel);
+    return { view, content };
+  }
+
   function injectPanel() {
     if (document.getElementById('salesAnalyticsPanel')) return;
-    const overview = document.getElementById('overview');
-    const dashboardGrid = overview?.querySelector('.dashboard-grid');
-    if (!overview || !dashboardGrid) return;
+    const { content } = ensureAnalyticsView();
+    if (!content) return;
     const panel = document.createElement('article');
     panel.id = 'salesAnalyticsPanel';
     panel.className = 'panel analytics-panel';
@@ -45,16 +79,17 @@
         <div><small>Gem. verkoopprijs</small><strong id="analyticsAverage">€ 0,00</strong></div>
       </div>
       <div class="analytics-top"><h4>Top 5 artikelen</h4><div id="analyticsTopItems"></div></div>`;
-    dashboardGrid.insertAdjacentElement('afterend', panel);
+    content.insertAdjacentElement('afterbegin', panel);
 
     const style = document.createElement('style');
     style.textContent = `
-      .analytics-panel{margin-top:24px}.analytics-head{gap:16px;align-items:flex-start}.analytics-period{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.analytics-period button{border:1px solid #e3e7e4;background:#fff;border-radius:999px;padding:7px 11px;font:inherit;font-size:12px;cursor:pointer}.analytics-period button.active{background:#17211b;color:#fff;border-color:#17211b}.analytics-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:18px 0}.analytics-kpis>div{padding:15px;border:1px solid #edf0ed;border-radius:14px;background:#fafbfa}.analytics-kpis small{display:block;color:#6d756f;margin-bottom:7px}.analytics-kpis strong{font-size:20px}.analytics-top h4{margin:4px 0 12px}.analytics-row{display:grid;grid-template-columns:minmax(120px,1fr) 90px 110px 110px;gap:12px;padding:10px 0;border-top:1px solid #edf0ed;align-items:center}.analytics-row small{color:#727a74}.analytics-empty{padding:14px 0;color:#727a74}@media(max-width:900px){.analytics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-row{grid-template-columns:1fr 70px}.analytics-row .analytics-secondary{display:none}}@media(max-width:520px){.analytics-kpis{grid-template-columns:1fr}.analytics-head{display:block}.analytics-period{justify-content:flex-start;margin-top:12px}}
+      #analyticsContent{display:grid;gap:24px}.analytics-existing-metrics{display:grid;grid-template-columns:minmax(0,360px);gap:16px}.analytics-existing-metrics .metric{height:100%}.analytics-panel{margin-top:0}.analytics-head{gap:16px;align-items:flex-start}.analytics-period{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.analytics-period button{border:1px solid #e3e7e4;background:#fff;border-radius:999px;padding:7px 11px;font:inherit;font-size:12px;cursor:pointer}.analytics-period button.active{background:#17211b;color:#fff;border-color:#17211b}.analytics-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:18px 0}.analytics-kpis>div{padding:15px;border:1px solid #edf0ed;border-radius:14px;background:#fafbfa}.analytics-kpis small{display:block;color:#6d756f;margin-bottom:7px}.analytics-kpis strong{font-size:20px}.analytics-top h4{margin:4px 0 12px}.analytics-row{display:grid;grid-template-columns:minmax(120px,1fr) 90px 110px 110px;gap:12px;padding:10px 0;border-top:1px solid #edf0ed;align-items:center}.analytics-empty{padding:14px 0;color:#727a74}@media(max-width:900px){.analytics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-row{grid-template-columns:1fr 70px}.analytics-row .analytics-secondary{display:none}}@media(max-width:520px){.analytics-kpis{grid-template-columns:1fr}.analytics-head{display:block}.analytics-period{justify-content:flex-start;margin-top:12px}.analytics-existing-metrics{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
   }
 
   async function refresh() {
+    ensureAnalyticsView();
     injectPanel();
     if (!document.getElementById('salesAnalyticsPanel')) return;
     try {
@@ -85,7 +120,9 @@
         const item = items.get(t.itemId);
         const unitCost = Number(t.buyPrice ?? t.costPrice ?? item?.buy ?? 0);
         const current = grouped.get(t.itemId) || { name: item?.name || 'Onbekend item', units: 0, revenue: 0, profit: 0 };
-        current.units += qty; current.revenue += saleRevenue; current.profit += saleRevenue - qty * unitCost;
+        current.units += qty;
+        current.revenue += saleRevenue;
+        current.profit += saleRevenue - qty * unitCost;
         grouped.set(t.itemId, current);
       });
       const top = [...grouped.values()].sort((a,b) => b.units - a.units || b.revenue - a.revenue).slice(0,5);
@@ -104,11 +141,17 @@
       refresh();
       return;
     }
-    if (e.target.closest('#saveTransaction,[data-toggle],[data-delete-transaction]')) {
-      clearTimeout(timer); timer = setTimeout(refresh, 150);
+    if (e.target.closest('#saveTransaction,[data-toggle],[data-delete-transaction],[data-delete-order]')) {
+      clearTimeout(timer);
+      timer = setTimeout(refresh, 150);
     }
   });
-  document.addEventListener('submit', e => { if (e.target?.id === 'transactionForm') { clearTimeout(timer); timer = setTimeout(refresh, 150); } });
+  document.addEventListener('submit', e => {
+    if (e.target?.id === 'transactionForm') {
+      clearTimeout(timer);
+      timer = setTimeout(refresh, 150);
+    }
+  });
   window.addEventListener('load', refresh);
   setInterval(refresh, 60000);
 })();
