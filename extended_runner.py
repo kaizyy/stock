@@ -25,7 +25,7 @@ class ExtendedHandler(app_runner.AppHandler):
             content = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
             content = content.replace(
                 "</body>",
-                '<script src="/settings.js?v=20260825-5"></script><script src="/features.js?v=20260825-5"></script><script src="/features_optional_fix.js?v=20260825-5"></script><script src="/role_dashboard.js?v=20260825-5"></script><script src="/average_sale_price.js?v=20260825-5"></script><script src="/analytics_dashboard.js?v=20260825-5"></script><script src="/inventory_intelligence.js?v=20260825-5"></script><script src="/barcode_scanner_fallback.js?v=20260825-5"></script><script src="/crm_orders.js?v=20260825-5"></script></body>'
+                '<script src="/settings.js?v=20260825-6"></script><script src="/features.js?v=20260825-6"></script><script src="/features_optional_fix.js?v=20260825-6"></script><script src="/role_dashboard.js?v=20260825-6"></script><script src="/average_sale_price.js?v=20260825-6"></script><script src="/analytics_dashboard.js?v=20260825-6"></script><script src="/inventory_intelligence.js?v=20260825-6"></script><script src="/barcode_scanner_fallback.js?v=20260825-6"></script><script src="/crm_orders.js?v=20260825-6"></script><script src="/dynamic_navigation.js?v=20260825-6"></script></body>'
             )
             self.send_html(200, content)
             return
