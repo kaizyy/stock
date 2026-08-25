@@ -2,7 +2,17 @@
   const euro = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
   let refreshTimer = null;
 
+  function ensureCard() {
+    const grid = document.querySelector('#overview .summary-grid');
+    if (!grid || document.getElementById('averageSalePriceValue')) return;
+    const card = document.createElement('article');
+    card.className = 'metric average-sale-price-metric';
+    card.innerHTML = '<div class="metric-icon green">€</div><p>Gemiddelde verkoopprijs</p><h2 id="averageSalePriceValue">€ 0,00</h2><span id="averageSalePriceCount">Nog geen verkochte items</span>';
+    grid.appendChild(card);
+  }
+
   async function refreshAverageSalePrice() {
+    ensureCard();
     const valueEl = document.getElementById('averageSalePriceValue');
     const countEl = document.getElementById('averageSalePriceCount');
     if (!valueEl || !countEl) return;
@@ -28,7 +38,7 @@
 
   function scheduleRefresh() {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(refreshAverageSalePrice, 120);
+    refreshTimer = setTimeout(refreshAverageSalePrice, 180);
   }
 
   window.addEventListener('load', refreshAverageSalePrice);
