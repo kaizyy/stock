@@ -8,7 +8,9 @@
     settings: 'Instellingen',
     relations: 'Relaties',
     orders: 'Orders',
-    warehouse: 'Magazijn'
+    warehouse: 'Magazijn',
+    notifications: 'Meldingen',
+    platformAdmin: 'Platformbeheer'
   };
 
   function activateView(id) {
