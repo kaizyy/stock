@@ -27,11 +27,8 @@
       <header class="topbar">
         <button class="mobile-menu" aria-label="Menu openen">☰</button>
         <div><p class="eyebrow">Zondag, 23 augustus</p><h1 id="pageTitle">Goedemorgen</h1></div>
-        <div class="top-actions">
-          <button class="button primary" id="quickAddBtn"><span>＋</span> Nieuwe transactie</button>
-        </div>
+        <div class="top-actions"><button class="button primary" id="quickAddBtn"><span>＋</span> Nieuwe transactie</button></div>
       </header>
-
       <section id="overview" class="view active-view">
         <div class="summary-grid">
           <article class="metric accent inventory-metric"><p>Voorraadwaarde</p><div class="inventory-primary"><h2 id="inventoryBuyValue">€ 0,00</h2><span>Inkoopwaarde</span></div><div class="metric-breakdown"><div><small>Potentiële omzet</small><strong id="inventorySellValue">€ 0,00</strong></div><div><small>Mogelijke brutowinst</small><strong id="potentialProfitValue">€ 0,00</strong></div></div><span id="inventoryUnits">0 items op voorraad</span></article>
@@ -39,81 +36,29 @@
           <article class="metric outstanding-metric"><div class="metric-icon amber">◷</div><p>Openstaand</p><h2 id="outstandingValue">€ 0,00</h2><span id="outstandingCount">0 betalingen te ontvangen</span><div class="metric-detail"><span>Tot 7 dagen <strong id="outstandingRecentValue">€ 0,00</strong></span><span class="danger-text">Ouder dan 7 dagen <strong id="outstandingOverdueValue">€ 0,00</strong></span></div></article>
           <article class="metric expected-metric"><div class="metric-icon blue">▣</div><p>Verwacht</p><h2 id="expectedValue">€ 0,00</h2><span id="expectedCount">0 inkomende leveringen</span><div class="metric-detail"><span class="success-text">Betaald, niet geleverd <strong id="expectedPaidValue">€ 0,00</strong></span><span class="danger-text">Niet betaald, niet geleverd <strong id="expectedUnpaidValue">€ 0,00</strong></span></div></article>
         </div>
-
-        <div class="dashboard-grid">
-          <article class="panel stock-panel"><div class="panel-head"><div><p class="eyebrow">Live overzicht</p><h3>Voorraad</h3></div><button class="text-button" data-go="inventory">Bekijk alles →</button></div><div id="stockList" class="stock-list"></div></article>
-          <article class="panel activity-panel"><div class="panel-head"><div><p class="eyebrow">Recente updates</p><h3>Activiteit</h3></div></div><div id="activityList" class="activity-list"></div></article>
-        </div>
-
-        <article class="panel chart-panel">
-          <div class="panel-head"><div><p class="eyebrow">Visueel overzicht</p><h3>Voorraad & omzet</h3></div><div class="chart-legend"><span><i class="actual"></i>Daadwerkelijk</span><span><i class="potential"></i>Potentieel</span></div></div>
-          <div class="chart-grid"><section><h4>Hoeveelheid voorraad</h4><div id="stockChart" class="stock-chart" role="img" aria-label="Hoeveelheid voorraad per item"></div></section><section><h4>Daadwerkelijke en potentiële omzet</h4><div id="revenueChart" class="revenue-chart" role="img" aria-label="Daadwerkelijke en potentiële omzet per item"></div></section></div>
-        </article>
-
-        <div class="status-grid">
-          <article class="status-card warning"><div><span class="status-symbol">€</span><div><p>Nog niet betaald</p><strong id="unpaidSummary">Geen openstaande betalingen</strong></div></div><button data-go="outgoing">Bekijken →</button></article>
-          <article class="status-card info"><div><span class="status-symbol">⌁</span><div><p>Nog niet geleverd</p><strong id="undeliveredSummary">Geen leveringen onderweg</strong></div></div><button data-go="incoming">Bekijken →</button></article>
-        </div>
+        <div class="dashboard-grid"><article class="panel stock-panel"><div class="panel-head"><div><p class="eyebrow">Live overzicht</p><h3>Voorraad</h3></div><button class="text-button" data-go="inventory">Bekijk alles →</button></div><div id="stockList" class="stock-list"></div></article><article class="panel activity-panel"><div class="panel-head"><div><p class="eyebrow">Recente updates</p><h3>Activiteit</h3></div></div><div id="activityList" class="activity-list"></div></article></div>
+        <article class="panel chart-panel"><div class="panel-head"><div><p class="eyebrow">Visueel overzicht</p><h3>Voorraad & omzet</h3></div><div class="chart-legend"><span><i class="actual"></i>Daadwerkelijk</span><span><i class="potential"></i>Potentieel</span></div></div><div class="chart-grid"><section><h4>Hoeveelheid voorraad</h4><div id="stockChart" class="stock-chart" role="img" aria-label="Hoeveelheid voorraad per item"></div></section><section><h4>Daadwerkelijke en potentiële omzet</h4><div id="revenueChart" class="revenue-chart" role="img" aria-label="Daadwerkelijke en potentiële omzet per item"></div></section></div></article>
+        <div class="status-grid"><article class="status-card warning"><div><span class="status-symbol">€</span><div><p>Nog niet betaald</p><strong id="unpaidSummary">Geen openstaande betalingen</strong></div></div><button data-go="outgoing">Bekijken →</button></article><article class="status-card info"><div><span class="status-symbol">⌁</span><div><p>Nog niet geleverd</p><strong id="undeliveredSummary">Geen leveringen onderweg</strong></div></div><button data-go="incoming">Bekijken →</button></article></div>
       </section>
-
       <section id="inventory" class="view"><div class="section-head"><div><p class="eyebrow">Actuele aantallen</p><h2>Voorraad</h2></div><div class="section-actions"><button class="button ghost" id="archiveBtn">Archief <span id="archiveCount">0</span></button><button class="button primary" data-add="item">＋ Nieuw item</button></div></div><div class="table-card"><table><thead><tr><th>Item</th><th>SKU</th><th>Voorraad</th><th>Inkoopprijs</th><th>Verkoopprijs</th><th>Waarde</th><th aria-label="Acties"></th></tr></thead><tbody id="inventoryTable"></tbody></table></div></section>
       <section id="incoming" class="view"><div class="section-head"><div><p class="eyebrow">Bestellingen bij leveranciers</p><h2>Inkomend</h2></div><button class="button primary" data-add="incoming">＋ Inkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet geleverd</button><button class="filter" data-filter="done">Geleverd</button></div><div id="incomingCards" class="transaction-list"></div></section>
-      <section id="outgoing" class="view"><div class="section-head"><div><p class="eyebrow">Verkopen aan klanten</p><h2>Uitgaand</h2></div><button class="button primary" data-add="outgoing">＋ Verkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet betaald</button><button class="filter" data-filter="done">Betaald</button></div><div id="outgoingCards" class="transaction-list"></div></section>
-      <footer class="site-footer">© 2026 <a href="https://valerith.nl" target="_blank" rel="noopener noreferrer">Valerith.nl</a></footer>
+      <section id="outgoing" class="view"><div class="section-head"><div><p class="eyebrow">Verkoop & betalingen</p><h2>Uitgaand</h2></div><button class="button primary" data-add="outgoing">＋ Verkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet betaald</button><button class="filter" data-filter="done">Betaald</button></div><div id="outgoingCards" class="transaction-list"></div></section>
+      <section id="archive" class="view"><div class="section-head"><div><p class="eyebrow">Niet-actieve items</p><h2>Archief</h2></div><button class="button ghost" data-go="inventory">← Terug</button></div><div id="archiveList" class="archive-list"></div></section>
+      <footer class="site-footer"></footer>
     </main>
   </div>
 
-  <dialog id="transactionDialog">
-    <form method="dialog" id="transactionForm" novalidate>
-      <div class="dialog-head"><div><p class="eyebrow">Nieuwe registratie</p><h2 id="dialogTitle">Transactie toevoegen</h2></div><button class="icon-button" value="cancel" formnovalidate aria-label="Sluiten">×</button></div>
-      <div class="type-switch"><button type="button" class="active" data-type="incoming">↓ Inkomend</button><button type="button" data-type="outgoing">↑ Uitgaand</button><button type="button" data-type="item">□ Nieuw item</button></div>
-      <input type="hidden" id="transactionType" value="incoming" />
-      <label>Item<select id="itemSelect" required></select></label>
-      <div id="newItemFields" hidden><div class="field-grid"><label>Itemnaam<input id="newItemName" placeholder="Bijv. Canvas tas" /></label><label>SKU<input id="newItemSku" placeholder="CT-001" /></label></div></div>
-      <div class="field-grid transaction-fields"><label>Aantal<input id="quantity" type="number" min="1" value="1" required /></label><label id="priceLabel">Inkoopprijs per item<input id="price" type="number" min="0" step="0.01" placeholder="0,00" required /></label></div>
-      <label class="transaction-fields">Datum<input id="transactionDate" type="date" required /></label>
-      <label id="salePriceLabel">Verkoopprijs per item<input id="salePrice" type="number" min="0" step="0.01" placeholder="0,00" /></label>
-      <label id="partyLabel">Leverancier <span class="optional-label">optioneel</span><input id="party" placeholder="Naam leverancier" /></label>
-      <label id="statusLabel" class="check-row"><input id="status" type="checkbox" /><span><strong>Al geleverd</strong><small>De voorraad wordt direct bijgewerkt.</small></span></label>
-      <label id="incomingPaidLabel" class="check-row"><input id="incomingPaid" type="checkbox" /><span><strong>Al betaald</strong><small>Deze inkoopkosten worden van de daadwerkelijke omzet afgetrokken.</small></span></label>
-      <div class="dialog-actions"><button class="button ghost" value="cancel" formnovalidate>Annuleren</button><button class="button primary" id="saveTransaction" value="default">Opslaan</button></div>
-    </form>
-  </dialog>
-  <dialog id="archiveDialog">
-    <div class="archive-dialog-content">
-      <div class="dialog-head"><div><p class="eyebrow">Verwijderde voorraad</p><h2>Archief beheren</h2></div><button class="icon-button" id="closeArchiveBtn" aria-label="Sluiten">×</button></div>
-      <p class="dialog-intro">Herstel een item of verwijder het definitief, inclusief alle gekoppelde inkoop-, verkoop- en omzetgeschiedenis.</p>
-      <div id="archiveList" class="archive-list"></div>
-    </div>
-  </dialog>
-  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="transactionDialog"><form method="dialog" id="transactionForm"><input type="hidden" id="transactionType" value="incoming"><div class="dialog-head"><div><p class="eyebrow">Transactie</p><h2 id="dialogTitle">Inkoop toevoegen</h2></div><button class="icon-button" value="cancel" formnovalidate>×</button></div><div class="type-switch"><button type="button" data-type="incoming" class="active">Inkoop</button><button type="button" data-type="outgoing">Verkoop</button><button type="button" data-type="item">Nieuw item</button></div><label>Item<select id="itemSelect"></select></label><div id="newItemFields"><label>Itemnaam<input id="newItemName"></label><label>SKU<input id="newItemSku"></label></div><div class="transaction-fields"><label>Aantal<input id="quantity" type="number" min="1" value="1"></label><label id="priceLabel">Prijs per item<input id="price" type="number" min="0" step="0.01" value="0"></label><label id="salePriceLabel">Verkoopprijs per item<input id="salePrice" type="number" min="0" step="0.01"></label><label id="partyLabel">Leverancier<input id="party"></label><label>Datum<input id="transactionDate" type="date"></label></div><label id="statusLabel"><span><strong>Al geleverd</strong><small>De voorraad wordt direct bijgewerkt.</small></span><input id="status" type="checkbox"></label><label id="incomingPaidLabel"><span><strong>Al betaald</strong><small>De betaling is al voldaan.</small></span><input id="incomingPaid" type="checkbox"></label><div class="dialog-actions"><button class="button ghost" value="cancel" formnovalidate>Annuleren</button><button class="button primary" id="saveTransactionBtn" type="submit" value="default">Opslaan</button></div></form></dialog>
+  <dialog id="archiveDialog"><div class="dialog-head"><div><p class="eyebrow">Archief</p><h2>Gearchiveerde items</h2></div><button class="icon-button" onclick="this.closest('dialog').close()">×</button></div><div id="archiveDialogList" class="archive-list"></div></dialog>
   <button id="exportBtn" type="button" hidden aria-hidden="true" tabindex="-1"></button>
+  <script src="performance_frontend.js?v=20260826-1"></script>
   <script src="dashboard_metrics.js?v=20260824-5"></script>
   <script src="app.js?v=20260824-5"></script>
   <script>
     (() => {
-      const greetingForHour = hour => {
-        if (hour >= 5 && hour < 12) return 'Goedemorgen';
-        if (hour >= 12 && hour < 18) return 'Goedemiddag';
-        if (hour >= 18 && hour < 23) return 'Goedenavond';
-        return 'Goedenacht';
-      };
-
-      const updateGreeting = () => {
-        const overview = document.getElementById('overview');
-        const title = document.getElementById('pageTitle');
-        if (overview?.classList.contains('active-view') && title) {
-          title.textContent = greetingForHour(new Date().getHours());
-        }
-      };
-
-      updateGreeting();
-      setInterval(updateGreeting, 60_000);
-      document.addEventListener('click', event => {
-        if (event.target.closest('[data-view="overview"], [data-go="overview"]')) {
-          setTimeout(updateGreeting, 0);
-        }
-      });
+      const greetingForHour = hour => { if (hour >= 5 && hour < 12) return 'Goedemorgen'; if (hour >= 12 && hour < 18) return 'Goedemiddag'; if (hour >= 18 && hour < 23) return 'Goedenavond'; return 'Goedenacht'; };
+      const updateGreeting = () => { const overview = document.getElementById('overview'); const title = document.getElementById('pageTitle'); if (overview?.classList.contains('active-view') && title) title.textContent = greetingForHour(new Date().getHours()); };
+      updateGreeting(); setInterval(updateGreeting, 60_000); document.addEventListener('click', event => { if (event.target.closest('[data-view="overview"], [data-go="overview"]')) setTimeout(updateGreeting, 0); });
     })();
   </script>
 </body>
