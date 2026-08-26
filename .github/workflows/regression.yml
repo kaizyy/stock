@@ -32,11 +32,11 @@ jobs:
       - uses: actions/checkout@v5
       - name: Install test dependencies
         run: |
-          python -m pip install "psycopg[binary]>=3.2,<4" "psycopg-pool>=3.2,<4" "reportlab>=4.2,<5"
+          python -m pip install "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5"
           sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Python syntax and regression checks
         run: |
-          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py warehouse_ops.py business_tools.py platform_admin.py billing.py account_tools.py email_events.py security_integrations.py backup_status.py documents_v2.py documents_v3.py financial_workflow.py performance_backend.py v11_integrations.py extended_runner.py tools/regression_check.py tests/*.py
+          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py warehouse_ops.py business_tools.py platform_admin.py billing.py account_tools.py email_events.py security_integrations.py backup_status.py documents_v2.py documents_v3.py financial_workflow.py v11_integrations.py extended_runner.py tools/regression_check.py tests/*.py
           python tools/regression_check.py
           python -m unittest discover -s tests -v
         env:
