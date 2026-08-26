@@ -15,6 +15,9 @@ import business_tools
 import platform_admin
 import billing
 
+# Keep authenticated web sessions valid for 2 hours.
+server.SESSION_TTL_SECONDS = 2 * 60 * 60
+
 
 def flat_form(handler):
     form = handler.form_data() or {}
