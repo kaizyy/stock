@@ -35,13 +35,19 @@
     }
 
     document.querySelector('.sidebar')?.classList.remove('open');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'auto' });
     return true;
   }
 
   document.addEventListener('click', event => {
     const trigger = event.target.closest('.nav-item[data-view], [data-go]');
     if (!trigger) return;
+
+    // app.js already binds direct onclick handlers to the static navigation.
+    // Do not process those clicks a second time here. This delegated handler
+    // is only the fallback for navigation items added later by feature modules.
+    if (typeof trigger.onclick === 'function') return;
+
     const id = trigger.dataset.view || trigger.dataset.go;
     if (!id || !document.getElementById(id)) return;
     event.preventDefault();
