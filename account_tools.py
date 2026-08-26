@@ -13,6 +13,13 @@ def initialize_account_tools():
           email BOOLEAN NOT NULL DEFAULT FALSE,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           PRIMARY KEY(user_id,stockroom_id,notification_type))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS notification_email_deliveries(
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,
+          notification_key TEXT NOT NULL,
+          notification_type TEXT NOT NULL,
+          sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY(user_id,stockroom_id,notification_key))""")
         conn.commit()
 
 def sessions_for(session,current_token_hash=None):
@@ -25,8 +32,7 @@ def sessions_for(session,current_token_hash=None):
 
 def revoke_session(session,token_hash,current_hash=None,all_others=False):
     with server.db() as conn:
-        if all_others:
-            conn.execute("DELETE FROM sessions WHERE user_id=%s AND token_hash<>%s",(session['user_id'],current_hash or ''))
+        if all_others: conn.execute("DELETE FROM sessions WHERE user_id=%s AND token_hash<>%s",(session['user_id'],current_hash or ''))
         else:
             row=conn.execute("SELECT token_hash FROM sessions WHERE token_hash=%s AND user_id=%s",(token_hash,session['user_id'])).fetchone()
             if not row: raise PermissionError('Sessie niet gevonden.')
@@ -100,3 +106,41 @@ def apply_import(session,kind,rows):
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'import.applied',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'kind':kind,'count':len(rows)})))
         conn.commit()
     return {'imported':len(rows)}
+
+def deliver_notification_emails(stockroom_id):
+    import platform_admin
+    notes=platform_admin.stockroom_notifications(stockroom_id)
+    active_keys={n.get('key') or platform_admin._notification_key(n) for n in notes}
+    with server.db() as conn:
+        if active_keys:
+            conn.execute("DELETE FROM notification_email_deliveries WHERE stockroom_id=%s AND NOT (notification_key = ANY(%s))",(stockroom_id,list(active_keys)))
+        else:
+            conn.execute("DELETE FROM notification_email_deliveries WHERE stockroom_id=%s",(stockroom_id,))
+        recipients=conn.execute("""SELECT u.id::text user_id,u.email,p.notification_type
+          FROM memberships m JOIN users u ON u.id=m.user_id
+          JOIN notification_preferences p ON p.user_id=u.id AND p.stockroom_id=m.stockroom_id
+          WHERE m.stockroom_id=%s AND p.email=TRUE""",(stockroom_id,)).fetchall()
+        sent={(r['user_id'],r['notification_key']) for r in conn.execute("SELECT user_id::text,notification_key FROM notification_email_deliveries WHERE stockroom_id=%s",(stockroom_id,)).fetchall()}
+        room=conn.execute("SELECT name FROM stockrooms WHERE id=%s",(stockroom_id,)).fetchone()
+        conn.commit()
+    by_type={}
+    for r in recipients: by_type.setdefault(r['notification_type'],[]).append(r)
+    delivered=0
+    for n in notes:
+        key=n.get('key') or platform_admin._notification_key(n); ntype=n.get('type')
+        for r in by_type.get(ntype,[]):
+            marker=(r['user_id'],key)
+            if marker in sent: continue
+            link=(server.APP_BASE_URL or '').rstrip('/') or 'Stockroom'
+            subject=f"Stockroom · {n.get('title','Melding')}"
+            text=f"{n.get('title','Melding')}\n\n{n.get('detail','')}\n\nStockroom: {(room or {}).get('name','')}\nOpenen: {link}/#notifications"
+            try:
+                server.send_email(r['email'],subject,text)
+                with server.db() as conn:
+                    conn.execute("INSERT INTO notification_email_deliveries(user_id,stockroom_id,notification_key,notification_type) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",(r['user_id'],stockroom_id,key,ntype));conn.commit()
+                delivered+=1;sent.add(marker)
+            except Exception as exc:
+                try:
+                    platform_admin.record_error('notification_email',type(exc).__name__,stockroom_id,r['user_id'],{'notificationType':ntype,'key':key})
+                except Exception: pass
+    return {'delivered':delivered}
