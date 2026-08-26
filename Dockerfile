@@ -10,7 +10,8 @@ COPY index.html styles.css mobile_nav_fix.css app.js dashboard_metrics.js settin
 COPY docker-entrypoint.sh /usr/local/bin/stockroom-entrypoint
 COPY tools/backup-postgres.sh tools/restore-postgres.sh tools/verify-restore.sh /usr/local/bin/
 
-RUN printf '\nimport("/security_integrations_ui.js?v=20260826-1").catch(()=>{});\nimport("/documents_v3_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/settings_tools.js \
+RUN sed -i 's#</head>#<link rel="stylesheet" href="/mobile_nav_fix.css?v=20260826-2" /></head>#' /app/public/index.html \
+    && printf '\nimport("/security_integrations_ui.js?v=20260826-1").catch(()=>{});\nimport("/documents_v3_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/settings_tools.js \
     && printf '\nimport("/backup_status_ui.js?v=20260826-1").catch(()=>{});\nimport("/platform_v2_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/platform_admin_ui.js \
     && printf '\nimport("/documents_v2_ui.js?v=20260826-1").catch(()=>{});\nimport("/documents_v3_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/crm_orders.js
 
