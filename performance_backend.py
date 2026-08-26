@@ -1,12 +1,34 @@
 import os
+import urllib.parse
+from http.server import SimpleHTTPRequestHandler
 
 import server
 
 _pool=None
+_headers_installed=False
+
+
+def _install_static_cache_headers():
+    global _headers_installed
+    if _headers_installed:return
+    _headers_installed=True
+    original=SimpleHTTPRequestHandler.end_headers
+    def optimized_end_headers(self):
+        try:
+            path=urllib.parse.urlparse(getattr(self,'path','')).path.lower()
+            if path.endswith(('.js','.css','.png','.jpg','.jpeg','.svg','.webp','.ico')):
+                self.send_header('Cache-Control','public, max-age=300, stale-while-revalidate=60')
+            elif path.startswith('/api/'):
+                self.send_header('Cache-Control','no-store')
+        except Exception:
+            pass
+        return original(self)
+    SimpleHTTPRequestHandler.end_headers=optimized_end_headers
 
 
 def install():
     global _pool
+    _install_static_cache_headers()
     if _pool is not None or not server.DATABASE_URL:
         return
     try:
