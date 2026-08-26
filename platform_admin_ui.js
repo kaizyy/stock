@@ -9,17 +9,12 @@
   async function loadNotifications(){try{renderNotifications((await api('/api/notifications')).notifications||[])}catch(e){renderNotifications([{severity:'danger',title:'Meldingen konden niet worden geladen',detail:e.message}])}}
   function openView(view){const nav=document.querySelector(`.nav-item[data-view="${view}"]`);if(nav){nav.click();return true}const sec=document.getElementById(view);if(!sec)return false;document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active-view',v===sec));return true}
   function highlight(el){if(!el)return;el.scrollIntoView({behavior:'smooth',block:'center'});el.classList.add('notification-target-highlight');setTimeout(()=>el.classList.remove('notification-target-highlight'),2200)}
-  function occurrenceIndex(index,type){let n=0;for(let i=0;i<index;i++)if(notificationItems[i]?.type===type)n++;return n}
-  async function openNotification(index){const n=notificationItems[index];if(!n)return;
-    if(n.type==='low_stock'){openView('inventory');setTimeout(()=>{const id=String(n.itemId||'');const el=id?(document.querySelector(`[data-delete-item="${CSS.escape(id)}"]`)?.closest('tr')||document.querySelector(`[data-barcode-row="${CSS.escape(id)}"]`)):null;highlight(el||document.getElementById('inventory'));},180);return;}
-    if(n.type==='unpaid'||n.type==='delivery'){
-      const state=await api('/api/state');const wanted=n.type==='unpaid'?'outgoing':'incoming';const open=(state.transactions||[]).filter(t=>t.type===wanted&&!t.done);const tx=open[occurrenceIndex(index,n.type)];openView(wanted);setTimeout(()=>{const id=String(tx?.id||'');const el=id?document.querySelector(`[data-edit-transaction="${CSS.escape(id)}"]`)?.closest('.transaction-card'):null;highlight(el||document.getElementById(wanted));},180);return;
-    }
-    if(n.type==='order'){
-      const [purchase,sales]=await Promise.all([api('/api/orders?type=purchase').catch(()=>({orders:[]})),api('/api/orders?type=sales').catch(()=>({orders:[]}))]);
-      const all=[...(purchase.orders||[]),...(sales.orders||[])];const title=String(n.title||'');const order=all.find(o=>title.includes(o.order_number||'__no__')||(o.reference&&title.includes(o.reference)));
-      openView('orders');setTimeout(()=>{let el=null;if(order?.id)el=document.querySelector(`[data-order-status="${CSS.escape(String(order.id))}"]`)?.closest('.order-card');if(!el&&order){el=[...document.querySelectorAll('#orders .order-card')].find(card=>card.textContent.includes(order.order_number||order.reference||''));}highlight(el||document.getElementById('orders'));},220);
-    }
+  function findTransactionCard(id,view){if(!id)return null;const escaped=CSS.escape(String(id));return document.querySelector(`#${view} [data-edit-transaction="${escaped}"]`)?.closest('.transaction-card')||document.querySelector(`#${view} [data-delete-transaction="${escaped}"]`)?.closest('.transaction-card')||null;}
+  function findOrderCard(id){if(!id)return null;const escaped=CSS.escape(String(id));return document.querySelector(`[data-order-status="${escaped}"]`)?.closest('.order-card')||document.querySelector(`[data-delete-order="${escaped}"]`)?.closest('.order-card')||null;}
+  async function openNotification(index){const n=notificationItems[index];if(!n||!isNavigable(n))return;const view=n.targetView||(n.type==='low_stock'?'inventory':n.type==='unpaid'?'outgoing':n.type==='delivery'?'incoming':'orders');openView(view);
+    if(n.type==='low_stock'){setTimeout(()=>{const id=String(n.targetId||n.itemId||'');const escaped=id?CSS.escape(id):'';const el=id?(document.querySelector(`[data-delete-item="${escaped}"]`)?.closest('tr')||document.querySelector(`[data-barcode-row="${escaped}"]`)):null;highlight(el||document.getElementById('inventory'));},180);return;}
+    if(n.type==='unpaid'||n.type==='delivery'){setTimeout(()=>highlight(findTransactionCard(n.targetId||n.transactionId,view)||document.getElementById(view)),180);return;}
+    if(n.type==='order'){setTimeout(()=>highlight(findOrderCard(n.targetId||n.orderId)||document.getElementById('orders')),240);return;}
   }
   let adminData=null,tab='stockrooms';
   function renderStats(s){document.getElementById('platformStats').innerHTML=[['Gebruikers',s.users],['Stockrooms',s.stockrooms],['Actieve sessies',s.active_sessions],['Geblokkeerde gebruikers',s.suspended_users],['Geblokkeerde stockrooms',s.suspended_stockrooms],['Fouten 24u',s.errors_24h]].map(([l,v])=>`<div class="platform-stat"><small>${esc(l)}</small><strong>${Number(v||0)}</strong></div>`).join('')}
