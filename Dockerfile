@@ -6,7 +6,7 @@ RUN apk add --no-cache curl su-exec postgresql-client \
     && pip install --no-cache-dir "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5"
 
 COPY server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py warehouse_ops.py business_tools.py platform_admin.py billing.py account_tools.py email_events.py security_integrations.py backup_status.py extended_runner.py /app/
-COPY index.html styles.css app.js dashboard_metrics.js settings.js settings_tools.js security_integrations_ui.js features.js features_optional_fix.js role_dashboard.js analytics_dashboard.js inventory_intelligence.js barcode_scanner_fallback.js crm_orders.js order_delete_ui.js dynamic_navigation.js warehouse_ops.js business_tools.js platform_admin_ui.js billing_ui.js /app/public/
+COPY index.html styles.css app.js dashboard_metrics.js settings.js settings_tools.js security_integrations_ui.js backup_status_ui.js features.js features_optional_fix.js role_dashboard.js analytics_dashboard.js inventory_intelligence.js barcode_scanner_fallback.js crm_orders.js order_delete_ui.js dynamic_navigation.js warehouse_ops.js business_tools.js platform_admin_ui.js billing_ui.js /app/public/
 COPY docker-entrypoint.sh /usr/local/bin/stockroom-entrypoint
 COPY tools/backup-postgres.sh tools/restore-postgres.sh tools/verify-restore.sh /usr/local/bin/
 
@@ -15,6 +15,7 @@ COPY tools/backup-postgres.sh tools/restore-postgres.sh tools/verify-restore.sh 
 # older JS/CSS URL from a browser/proxy cache.
 RUN ASSET_VERSION="$(date +%s)" \
     && printf '\nimport("/security_integrations_ui.js?v=%s").catch(()=>{});\n' "$ASSET_VERSION" >> /app/public/settings_tools.js \
+    && printf '\nimport("/backup_status_ui.js?v=%s").catch(()=>{});\n' "$ASSET_VERSION" >> /app/public/platform_admin_ui.js \
     && find /app/public -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' \) -exec sed -i -E "s/v=20[0-9A-Za-z._-]+/v=${ASSET_VERSION}/g" {} + \
     && sed -i -E "s/v=20[0-9A-Za-z._-]+/v=${ASSET_VERSION}/g" /app/extended_runner.py \
     && printf '%s\n' "$ASSET_VERSION" > /app/asset-version
