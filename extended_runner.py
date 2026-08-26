@@ -14,6 +14,7 @@ import warehouse_ops as warehouse
 import business_tools
 import platform_admin
 import billing
+import account_tools
 
 server.SESSION_TTL_SECONDS = 2 * 60 * 60
 
@@ -49,7 +50,16 @@ class ExtendedHandler(app_runner.AppHandler):
         if path in ("/","/index.html"):
             session=self.require_session(api=False)
             if not session:return
-            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260826-3"></script><script src="/features.js?v=20260826-3"></script><script src="/features_optional_fix.js?v=20260826-3"></script><script src="/role_dashboard.js?v=20260826-3"></script><script src="/analytics_dashboard.js?v=20260826-3"></script><script src="/inventory_intelligence.js?v=20260826-3"></script><script src="/barcode_scanner_fallback.js?v=20260826-3"></script><script src="/dynamic_navigation.js?v=20260826-3"></script><script src="/crm_orders.js?v=20260826-3"></script><script src="/order_delete_ui.js?v=20260826-3"></script><script src="/warehouse_ops.js?v=20260826-3"></script><script src="/business_tools.js?v=20260826-3"></script><script src="/platform_admin_ui.js?v=20260826-3"></script><script src="/billing_ui.js?v=20260826-3"></script></body>');self.send_html(200,content);return
+            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260826-4"></script><script src="/settings_tools.js?v=20260826-4"></script><script src="/features.js?v=20260826-4"></script><script src="/features_optional_fix.js?v=20260826-4"></script><script src="/role_dashboard.js?v=20260826-4"></script><script src="/analytics_dashboard.js?v=20260826-4"></script><script src="/inventory_intelligence.js?v=20260826-4"></script><script src="/barcode_scanner_fallback.js?v=20260826-4"></script><script src="/dynamic_navigation.js?v=20260826-4"></script><script src="/crm_orders.js?v=20260826-4"></script><script src="/order_delete_ui.js?v=20260826-4"></script><script src="/warehouse_ops.js?v=20260826-4"></script><script src="/business_tools.js?v=20260826-4"></script><script src="/platform_admin_ui.js?v=20260826-4"></script><script src="/billing_ui.js?v=20260826-4"></script></body>');self.send_html(200,content);return
+        if path=="/api/account/sessions":
+            s=self.require_session(api=True)
+            if s:
+                token=self.cookie_token();current=server.token_digest(token) if token else None;self.send_json(200,{"sessions":account_tools.sessions_for(s,current)})
+            return
+        if path=="/api/account/notification-preferences":
+            s=self.require_session(api=True)
+            if s:self.send_json(200,{"preferences":account_tools.preferences(s)})
+            return
         if path=="/api/billing":
             s=self.require_session(api=True)
             if s:self.send_json(200,billing.account(s['stockroom_id']))
@@ -64,21 +74,19 @@ class ExtendedHandler(app_runner.AppHandler):
         if path=="/api/notifications":
             s=self.require_session(api=True)
             if s:
-                notes=platform_admin.stockroom_notifications(s['stockroom_id'],s['user_id']);self.send_json(200,{"notifications":notes,"unread":sum(1 for n in notes if not n.get('read'))})
+                notes=platform_admin.stockroom_notifications(s['stockroom_id'],s['user_id']);notes=account_tools.filter_notifications(s,notes);self.send_json(200,{"notifications":notes,"unread":sum(1 for n in notes if not n.get('read'))})
             return
         if path=="/api/orders/detail":
             s=self.require_session(api=True)
             if not s:return
             oid=parse_qs(parsed.query).get('id',[''])[0]
-            with server.db() as conn:
-                row=conn.execute("SELECT order_type FROM orders WHERE id=%s AND stockroom_id=%s",(oid,s['stockroom_id'])).fetchone()
+            with server.db() as conn:row=conn.execute("SELECT order_type FROM orders WHERE id=%s AND stockroom_id=%s",(oid,s['stockroom_id'])).fetchone()
             if not row:self.send_json(404,{"error":"Order niet gevonden."});return
             cap='read_purchase' if row['order_type']=='purchase' else 'read_sales'
             if not orders.allowed(s['role'],cap):self.send_json(403,{"error":"Geen rechten."});return
             found=next((o for o in business_tools.enrich_orders(s['stockroom_id'],orders.order_rows(s['stockroom_id'],row['order_type'])) if str(o['id'])==str(oid)),None)
             if not found:self.send_json(404,{"error":"Order niet gevonden."});return
-            with server.db() as conn:
-                audit=conn.execute("SELECT action,details,created_at,u.name user_name,u.email user_email FROM audit_log a LEFT JOIN users u ON u.id=a.user_id WHERE a.stockroom_id=%s AND a.details->>'id'=%s ORDER BY a.created_at DESC LIMIT 50",(s['stockroom_id'],str(oid))).fetchall()
+            with server.db() as conn:audit=conn.execute("SELECT action,details,created_at,u.name user_name,u.email user_email FROM audit_log a LEFT JOIN users u ON u.id=a.user_id WHERE a.stockroom_id=%s AND a.details->>'id'=%s ORDER BY a.created_at DESC LIMIT 50",(s['stockroom_id'],str(oid))).fetchall()
             found['audit']=audit;self.send_json(200,{"order":found});return
         if path in ("/api/suppliers","/api/customers"):
             s=self.require_session(api=True)
@@ -124,13 +132,20 @@ class ExtendedHandler(app_runner.AppHandler):
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/orders","/api/orders/status","/api/orders/delete","/api/warehouse/count","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state"}
+        handled={"/api/suppliers","/api/customers","/api/orders","/api/orders/status","/api/orders/delete","/api/warehouse/count","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
             if not s:return
             values=flat_form(self)
             try:
+                if path=="/api/account/sessions/revoke":
+                    token=self.cookie_token();current=server.token_digest(token) if token else None;self.send_json(200,account_tools.revoke_session(s,values.get('session_id') or '',current,str(values.get('all_others') or '')=='1'));return
+                if path=="/api/account/notification-preferences":self.send_json(200,account_tools.save_preferences(s,values));return
+                if path in ("/api/import/preview","/api/import/apply"):
+                    try:rows=json.loads(values.get('rows_json') or '[]')
+                    except json.JSONDecodeError:raise ValueError('Importgegevens zijn ongeldig.')
+                    kind=values.get('kind') or 'inventory';result=account_tools.preview_import(s,kind,rows) if path.endswith('preview') else account_tools.apply_import(s,kind,rows);self.send_json(200,result);return
                 if path=="/api/notifications/state":self.send_json(200,platform_admin.update_notification_state(s,values.get('key') or '',values.get('action') or ''));return
                 if path=="/api/billing/profile":self.send_json(200,billing.save_profile(s['stockroom_id'],values));return
                 if path=="/api/billing/checkout":base=self.base_url();self.send_json(200,billing.checkout(s['stockroom_id'],values.get('plan',''),base+'/?billing=success',base+'/?billing=cancel'));return
@@ -165,5 +180,5 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();platform_admin.initialize_platform_admin();billing.initialize_billing();app_runner.self_test_permissions();server.cleanup_expired()
-    handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met SaaS-abonnementen, Stripe, platformbeheer en magazijnprocessen",flush=True);httpd.serve_forever()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()
