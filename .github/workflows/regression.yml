@@ -36,16 +36,19 @@ jobs:
           sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Python syntax and regression checks
         run: |
-          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py warehouse_ops.py business_tools.py platform_admin.py billing.py extended_runner.py tools/regression_check.py tests/*.py
+          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py warehouse_ops.py business_tools.py platform_admin.py billing.py account_tools.py email_events.py security_integrations.py backup_status.py extended_runner.py tools/regression_check.py tests/*.py
           python tools/regression_check.py
           python -m unittest discover -s tests -v
         env:
           TEST_DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_test
+          SECURITY_ENCRYPTION_KEY: ci-test-security-key
       - name: Backup and restore verification
         run: |
           createdb --host=localhost --username=stockroom stockroom_restore
-          backup=$(BACKUP_DIR="$RUNNER_TEMP/backups" tools/backup-postgres.sh)
+          export BACKUP_DIR="$RUNNER_TEMP/backups"
+          backup=$(tools/backup-postgres.sh)
           tools/verify-restore.sh "$backup"
+          test -s "$BACKUP_DIR/last-restore-test.ok"
         env:
           PGPASSWORD: test-password
           DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_test
