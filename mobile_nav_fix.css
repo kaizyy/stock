@@ -1,0 +1,18 @@
+@media (max-width:900px){
+  .sidebar{
+    left:0 !important;
+    transform:translate3d(-100%,0,0);
+    transition:transform .18s ease-out !important;
+    will-change:transform;
+    contain:layout paint;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    backface-visibility:hidden;
+  }
+  .sidebar.open{transform:translate3d(0,0,0)}
+  .mobile-menu{touch-action:manipulation}
+}
+@media (prefers-reduced-motion:reduce){
+  .sidebar{transition:none !important}
+}
