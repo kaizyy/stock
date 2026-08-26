@@ -33,7 +33,7 @@ SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USERNAME or "noreply@localhost")
 MAX_BODY_BYTES = 1_000_000
-SESSION_TTL_SECONDS = 30 * 60
+SESSION_TTL_SECONDS = 2 * 60 * 60
 VERIFY_TTL_SECONDS = 24 * 60 * 60
 RESET_TTL_SECONDS = 30 * 60
 EMAIL_CHANGE_TTL_SECONDS = 30 * 60
@@ -662,39 +662,64 @@ class StockroomHandler(SimpleHTTPRequestHandler):
                     audit_user_action(conn, row["user_id"], "account.email_verified")
                 conn.execute("UPDATE auth_tokens SET used_at=NOW() WHERE token_hash=%s", (token_digest(raw),))
                 conn.commit()
-            message = "Je nieuwe e-mailadres is bevestigd. Alle apparaten zijn uitgelogd." if row["purpose"] == "change_email" else "Je e-mailadres is bevestigd. Je kunt nu inloggen."
-            self.send_html(200, result_page("E-mail geverifieerd", message))
-            return
-        if path == "/logout":
-            if not self.current_session():
-                self.redirect("/login", clear_cookie=True)
-            else:
-                self.send_html(200, auth_page("Uitloggen", "Bevestig dat je deze sessie wilt beëindigen.", '<form method="post" action="/logout"><button type="submit">Uitloggen</button></form>'))
+            message = "Je nieuwe e-mailadres is bevestigd. Log opnieuw in." if row["purpose"] == "change_email" else "Je e-mailadres is bevestigd. Je kunt nu inloggen."
+            self.send_html(200, result_page("E-mailadres bevestigd", message))
             return
 
-        is_api = path.startswith("/api/")
-        session = self.require_session(api=is_api)
-        if not session:
+        if path == "/":
+            session = self.require_session(api=False)
+            if not session:
+                return
+            self.send_from_public("index.html", "text/html; charset=utf-8")
             return
+
         if path == "/api/state":
+            session = self.require_session(api=True)
+            if not session:
+                return
             with db() as conn:
                 row = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (session["stockroom_id"],)).fetchone()
             self.send_json(200, row["state"] if row else EMPTY_STATE)
             return
-        if path == "/api/session":
-            self.send_json(200, {"expiresAt": session["expires_at"]})
-            return
-        if path == "/api/me":
-            self.send_json(200, {
-                "user": {"id": session["user_id"], "name": session["user_name"], "email": session["email"]},
-                "stockroom": {"id": session["stockroom_id"], "name": session["stockroom_name"], "role": session["role"]},
-                "stockrooms": self.memberships_for(session["user_id"]),
-            })
-            return
+
         if path == "/members":
+            session = self.require_session(api=False)
+            if not session:
+                return
             self.send_html(200, members_page(session, self.memberships_for(session["user_id"]), self.members_for(session["stockroom_id"])))
             return
+
+        if path == "/logout":
+            session = self.current_session()
+            if session:
+                with db() as conn:
+                    audit_user_action(conn, session["user_id"], "account.logout")
+                    conn.execute("DELETE FROM sessions WHERE token_hash=%s", (token_digest(self.cookie_token()),))
+                    conn.commit()
+            self.redirect("/login", clear_cookie=True)
+            return
+
+        if path.startswith("/api/"):
+            self.send_error(404)
+            return
         super().do_GET()
+
+    def send_from_public(self, filename, content_type):
+        path = (PUBLIC_DIR / filename).resolve()
+        if PUBLIC_DIR.resolve() not in path.parents and path != PUBLIC_DIR.resolve():
+            self.send_error(404)
+            return
+        try:
+            body = path.read_bytes()
+        except FileNotFoundError:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store" if content_type.startswith("text/html") else "public, max-age=300")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_HEAD(self):
         if urlparse(self.path).path == "/health":
@@ -973,6 +998,6 @@ if __name__ == "__main__":
     initialize_database()
     cleanup_expired()
     handler = partial(StockroomHandler, directory=str(PUBLIC_DIR))
-    server = ThreadingHTTPServer((HOST, PORT), handler)
-    log_event(f"Stockroom draait op poort {PORT} met PostgreSQL, e-mailverificatie en {SESSION_TTL_SECONDS // 60} minuten sessies")
-    server.serve_forever()
+    httpd = ThreadingHTTPServer((HOST, PORT), handler)
+    print(f"Stockroom draait op http://{HOST}:{PORT}")
+    httpd.serve_forever()
