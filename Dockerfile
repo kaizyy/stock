@@ -10,7 +10,8 @@ COPY index.html styles.css app.js dashboard_metrics.js settings.js settings_tool
 COPY docker-entrypoint.sh /usr/local/bin/stockroom-entrypoint
 COPY tools/backup-postgres.sh tools/restore-postgres.sh tools/verify-restore.sh /usr/local/bin/
 
-RUN printf '\nimport("/security_integrations_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/settings_tools.js
+RUN printf '\nimport("/security_integrations_ui.js?v=20260826-1607").catch(()=>{});\n' >> /app/public/settings_tools.js \
+    && sed -i -E 's/v=20260826-[0-9]+/v=20260826-1607/g; s/v=20260824-[0-9]+/v=20260826-1607/g' /app/extended_runner.py /app/public/index.html /app/public/settings_tools.js
 
 RUN addgroup -S stockroom && adduser -S stockroom -G stockroom \
     && chown -R stockroom:stockroom /app \
