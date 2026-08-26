@@ -6,11 +6,12 @@ RUN apk add --no-cache curl su-exec postgresql-client \
     && pip install --no-cache-dir "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5"
 
 COPY server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py warehouse_ops.py business_tools.py platform_admin.py billing.py account_tools.py email_events.py security_integrations.py backup_status.py documents_v2.py documents_v3.py v11_integrations.py extended_runner.py /app/
-COPY index.html styles.css mobile_nav_fix.css app.js dashboard_metrics.js settings.js settings_tools.js security_integrations_ui.js backup_status_ui.js documents_v2_ui.js documents_v3_ui.js platform_v2_ui.js features.js features_optional_fix.js role_dashboard.js analytics_dashboard.js inventory_intelligence.js barcode_scanner_fallback.js crm_orders.js order_delete_ui.js dynamic_navigation.js warehouse_ops.js business_tools.js platform_admin_ui.js billing_ui.js /app/public/
+COPY index.html styles.css mobile_nav_fix.css app.js nav_stability.js dashboard_metrics.js settings.js settings_tools.js security_integrations_ui.js backup_status_ui.js documents_v2_ui.js documents_v3_ui.js platform_v2_ui.js features.js features_optional_fix.js role_dashboard.js analytics_dashboard.js inventory_intelligence.js barcode_scanner_fallback.js crm_orders.js order_delete_ui.js dynamic_navigation.js warehouse_ops.js business_tools.js platform_admin_ui.js billing_ui.js /app/public/
 COPY docker-entrypoint.sh /usr/local/bin/stockroom-entrypoint
 COPY tools/backup-postgres.sh tools/restore-postgres.sh tools/verify-restore.sh /usr/local/bin/
 
-RUN sed -i 's#</head>#<link rel="stylesheet" href="/mobile_nav_fix.css?v=20260826-2" /></head>#' /app/public/index.html \
+RUN sed -i 's#<script src="app.js?v=20260824-5"></script>#<script src="app.js?v=20260824-5"></script><script src="/nav_stability.js?v=20260826-1"></script>#' /app/public/index.html \
+    && sed -i 's#</head>#<link rel="stylesheet" href="/mobile_nav_fix.css?v=20260826-2" /></head>#' /app/public/index.html \
     && printf '\nimport("/security_integrations_ui.js?v=20260826-1").catch(()=>{});\nimport("/documents_v3_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/settings_tools.js \
     && printf '\nimport("/backup_status_ui.js?v=20260826-1").catch(()=>{});\nimport("/platform_v2_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/platform_admin_ui.js \
     && printf '\nimport("/documents_v2_ui.js?v=20260826-1").catch(()=>{});\nimport("/documents_v3_ui.js?v=20260826-1").catch(()=>{});\n' >> /app/public/crm_orders.js
