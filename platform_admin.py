@@ -151,19 +151,40 @@ def stockroom_notifications(stockroom_id):
             stock = float(item.get('stock') or 0)
             minimum = float(item.get('minStock') or 0)
             if minimum > 0 and stock <= minimum:
-                notifications.append({'type':'low_stock','severity':'warning','title':f"Lage voorraad: {item.get('name','Artikel')}",'detail':f'{stock:g} op voorraad · minimum {minimum:g}','itemId':str(item.get('id') or '')})
+                item_id = str(item.get('id') or '')
+                notifications.append({
+                    'type':'low_stock','severity':'warning',
+                    'title':f"Lage voorraad: {item.get('name','Artikel')}",
+                    'detail':f'{stock:g} op voorraad · minimum {minimum:g}',
+                    'targetView':'inventory','targetType':'item','targetId':item_id,'itemId':item_id,
+                })
         for tx in state.get('transactions', []):
+            tx_id = str(tx.get('id') or '')
             if tx.get('type') == 'outgoing' and not tx.get('done'):
-                notifications.append({'type':'unpaid','severity':'warning','title':'Openstaande verkoop','detail':f"{tx.get('party') or tx.get('itemName') or 'Verkoop'} · nog niet afgerond"})
+                notifications.append({
+                    'type':'unpaid','severity':'warning','title':'Openstaande verkoop',
+                    'detail':f"{tx.get('party') or tx.get('itemName') or 'Verkoop'} · nog niet afgerond",
+                    'targetView':'outgoing','targetType':'transaction','targetId':tx_id,'transactionId':tx_id,
+                })
             elif tx.get('type') == 'incoming' and not tx.get('done'):
-                notifications.append({'type':'delivery','severity':'info','title':'Levering nog niet ontvangen','detail':f"{tx.get('party') or tx.get('itemName') or 'Inkoop'}"})
+                notifications.append({
+                    'type':'delivery','severity':'info','title':'Levering nog niet ontvangen',
+                    'detail':f"{tx.get('party') or tx.get('itemName') or 'Inkoop'}",
+                    'targetView':'incoming','targetType':'transaction','targetId':tx_id,'transactionId':tx_id,
+                })
         pending = conn.execute("""
-          SELECT order_type,status,order_number,reference,relation_name,order_date
+          SELECT id::text,order_type,status,order_number,reference,relation_name,order_date
           FROM orders WHERE stockroom_id=%s AND status NOT IN ('received','completed','paid','cancelled')
           ORDER BY order_date LIMIT 100
         """, (stockroom_id,)).fetchall()
         for order in pending:
-            notifications.append({'type':'order','severity':'info','title':f"Open order {order.get('order_number') or order.get('reference') or ''}",'detail':f"{order['relation_name'] or 'Geen relatie'} · {order['status']}"})
+            notifications.append({
+                'type':'order','severity':'info',
+                'title':f"Open order {order.get('order_number') or order.get('reference') or ''}",
+                'detail':f"{order['relation_name'] or 'Geen relatie'} · {order['status']}",
+                'targetView':'orders','targetType':'order','targetId':order['id'],
+                'orderId':order['id'],'orderType':order['order_type'],
+            })
         errors = conn.execute("""
           SELECT component,message,created_at FROM app_error_log
           WHERE stockroom_id=%s AND created_at>NOW()-INTERVAL '7 days' ORDER BY created_at DESC LIMIT 20
