@@ -15,6 +15,7 @@ import business_tools
 import platform_admin
 import billing
 import account_tools
+import backup_status
 
 server.SESSION_TTL_SECONDS = 2 * 60 * 60
 
@@ -50,7 +51,7 @@ class ExtendedHandler(app_runner.AppHandler):
         if path in ("/","/index.html"):
             session=self.require_session(api=False)
             if not session:return
-            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260826-4"></script><script src="/settings_tools.js?v=20260826-4"></script><script src="/features.js?v=20260826-4"></script><script src="/features_optional_fix.js?v=20260826-4"></script><script src="/role_dashboard.js?v=20260826-4"></script><script src="/analytics_dashboard.js?v=20260826-4"></script><script src="/inventory_intelligence.js?v=20260826-4"></script><script src="/barcode_scanner_fallback.js?v=20260826-4"></script><script src="/dynamic_navigation.js?v=20260826-4"></script><script src="/crm_orders.js?v=20260826-4"></script><script src="/order_delete_ui.js?v=20260826-4"></script><script src="/warehouse_ops.js?v=20260826-4"></script><script src="/business_tools.js?v=20260826-4"></script><script src="/platform_admin_ui.js?v=20260826-4"></script><script src="/billing_ui.js?v=20260826-4"></script></body>');self.send_html(200,content);return
+            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260826-5"></script><script src="/settings_tools.js?v=20260826-5"></script><script src="/features.js?v=20260826-5"></script><script src="/features_optional_fix.js?v=20260826-5"></script><script src="/role_dashboard.js?v=20260826-5"></script><script src="/analytics_dashboard.js?v=20260826-5"></script><script src="/inventory_intelligence.js?v=20260826-5"></script><script src="/barcode_scanner_fallback.js?v=20260826-5"></script><script src="/dynamic_navigation.js?v=20260826-5"></script><script src="/crm_orders.js?v=20260826-5"></script><script src="/order_delete_ui.js?v=20260826-5"></script><script src="/warehouse_ops.js?v=20260826-5"></script><script src="/business_tools.js?v=20260826-5"></script><script src="/platform_admin_ui.js?v=20260826-5"></script><script src="/billing_ui.js?v=20260826-5"></script></body>');self.send_html(200,content);return
         if path=="/api/account/sessions":
             s=self.require_session(api=True)
             if s:
@@ -70,7 +71,7 @@ class ExtendedHandler(app_runner.AppHandler):
             return
         if path=="/api/platform-admin":
             if not self.require_platform_admin():return
-            data=platform_admin.platform_overview();data['billing']=billing.platform_metrics();self.send_json(200,data);return
+            data=platform_admin.platform_overview();data['billing']=billing.platform_metrics();data['backup']=backup_status.backup_status();self.send_json(200,data);return
         if path=="/api/notifications":
             s=self.require_session(api=True)
             if s:
