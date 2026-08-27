@@ -129,7 +129,11 @@ def install():
             if not s:return
             if s.get('role') not in ('owner','admin','member','seller','buyer'):
                 self.send_json(403,{'error':'Geen rechten.'});return
-            f=self.form_data() or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
+            # Logo wordt als base64-string in multipart/form-data meegestuurd. De algemene
+            # form_data-limiet is 16 KB en is daarvoor te klein; beperk de ruimere limiet
+            # uitsluitend tot deze documentroutes.
+            max_form_bytes=550000 if path=='/api/documents/settings' else 32768
+            f=self.form_data(max_bytes=max_form_bytes) or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
             try:
                 if path=='/api/documents/settings':res=save_settings(s['stockroom_id'],v)
                 elif path.endswith('/logo/remove'):res=remove_logo(s['stockroom_id'])
