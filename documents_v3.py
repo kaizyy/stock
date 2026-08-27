@@ -43,6 +43,12 @@ def settings(stockroom_id):
     return dict(r or {})
 
 
+def branding(stockroom_id):
+    with server.db() as conn:
+        r=conn.execute("SELECT logo_data FROM billing_accounts WHERE stockroom_id=%s",(stockroom_id,)).fetchone()
+    return {'logo_data':(r or {}).get('logo_data') or ''}
+
+
 def save_settings(stockroom_id, values):
     term=max(0,min(365,int(values.get('payment_term_days') or 14)))
     vat=float(values.get('default_vat_percent') or 0)
@@ -116,9 +122,9 @@ def install():
     old_get=server.StockroomHandler.do_GET;old_post=server.StockroomHandler.do_POST
     def do_GET(self):
         p=urllib.parse.urlparse(self.path)
-        if p.path=='/api/documents/settings':
+        if p.path in ('/api/documents/settings','/api/documents/branding'):
             s=self.require_session(api=True)
-            if s:self.send_json(200,settings(s['stockroom_id']))
+            if s:self.send_json(200,branding(s['stockroom_id']) if p.path.endswith('/branding') else settings(s['stockroom_id']))
             return
         return old_get(self)
     def do_POST(self):
@@ -129,9 +135,6 @@ def install():
             if not s:return
             if s.get('role') not in ('owner','admin','member','seller','buyer'):
                 self.send_json(403,{'error':'Geen rechten.'});return
-            # Logo wordt als base64-string in multipart/form-data meegestuurd. De algemene
-            # form_data-limiet is 16 KB en is daarvoor te klein; beperk de ruimere limiet
-            # uitsluitend tot deze documentroutes.
             max_form_bytes=550000 if path=='/api/documents/settings' else 32768
             f=self.form_data(max_bytes=max_form_bytes) or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
             try:
