@@ -169,9 +169,13 @@ def delete_relation(session, kind, relation_id):
 def order_rows(stockroom_id, order_type):
     with server.db() as conn:
         rows = conn.execute(
-            """SELECT id::text,order_type,relation_id::text,relation_name,status,reference,notes,order_date,
-                      inventory_booked_at,created_at,updated_at
-               FROM orders WHERE stockroom_id=%s AND order_type=%s ORDER BY order_date DESC,created_at DESC LIMIT 200""",
+            """SELECT o.id::text,o.order_type,o.relation_id::text,o.relation_name,o.status,o.reference,o.notes,o.order_date,
+                      o.inventory_booked_at,o.created_at,o.updated_at,
+                      COALESCE(s.email,c.email,'') relation_email
+               FROM orders o
+               LEFT JOIN suppliers s ON o.order_type='purchase' AND s.id=o.relation_id AND s.stockroom_id=o.stockroom_id
+               LEFT JOIN customers c ON o.order_type='sales' AND c.id=o.relation_id AND c.stockroom_id=o.stockroom_id
+               WHERE o.stockroom_id=%s AND o.order_type=%s ORDER BY o.order_date DESC,o.created_at DESC LIMIT 200""",
             (stockroom_id, order_type),
         ).fetchall()
         for order in rows:
