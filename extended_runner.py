@@ -159,6 +159,8 @@ class ExtendedHandler(app_runner.AppHandler):
                 if path=="/api/orders":
                     ot=values.get('order_type');cap='write_purchase' if ot=='purchase' else 'write_sales'
                     if ot not in ('purchase','sales') or not orders.allowed(s['role'],cap):self.send_json(403,{"error":"Geen rechten voor dit ordertype."});return
+                    if values.get('order_id'):
+                        oid=orders.update_order(s,values);self.send_json(200,{"updated":True,"id":oid});return
                     oid=orders.create_order(s,values);num=business_tools.assign_order_number(oid,s['stockroom_id'],ot);self.send_json(200,{"created":True,"id":oid,"order_number":num});return
                 if path=="/api/orders/status":
                     ot=values.get('order_type');cap='write_purchase' if ot=='purchase' else 'write_sales'
@@ -183,3 +185,4 @@ if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
     server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()
+

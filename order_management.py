@@ -211,6 +211,116 @@ def create_order(session, values):
     return order_id
 
 
+def _validate_invoice_balance(conn, stockroom_id, order_id, lines):
+    invoice = conn.execute(
+        "SELECT vat_percent::float8,paid_amount::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s",
+        (order_id, stockroom_id),
+    ).fetchone()
+    if not invoice:
+        return
+    credited = conn.execute(
+        "SELECT COALESCE(SUM(amount),0)::float8 amount FROM credit_notes WHERE order_id=%s AND stockroom_id=%s",
+        (order_id, stockroom_id),
+    ).fetchone()
+    total = round(sum(qty * price for _, _, _, qty, price in lines) * (1 + float(invoice["vat_percent"] or 0) / 100), 2)
+    settled = float(invoice["paid_amount"] or 0) + float((credited or {}).get("amount") or 0)
+    if total + 0.01 < settled:
+        raise ValueError("Het nieuwe factuurbedrag mag niet lager zijn dan het reeds betaalde en gecrediteerde bedrag.")
+
+
+def _reverse_inventory_booking(conn, session, order, old_lines, state):
+    transactions = [t for t in state.get("transactions", []) if str(t.get("orderId")) == str(order["id"])]
+    for line in old_lines:
+        item = _find_state_item(state, line["item_id"])
+        if not item:
+            raise ValueError(f"Artikel bestaat niet meer: {line['item_name']}")
+        qty = float(line["quantity"])
+        if order["order_type"] == "purchase":
+            if float(item.get("stock") or 0) < qty:
+                raise ValueError(f"De geboekte voorraad van {line['item_name']} is al gebruikt; pas deze order daarom niet aan.")
+            item["stock"] = float(item.get("stock") or 0) - qty
+        else:
+            item["stock"] = float(item.get("stock") or 0) + qty
+    state["transactions"] = [t for t in state.get("transactions", []) if str(t.get("orderId")) != str(order["id"])]
+    return transactions
+
+
+def update_order(session, values):
+    order_id = (values.get("order_id") or "").strip()
+    expected_type = (values.get("order_type") or "").strip()
+    if not order_id or expected_type not in ("purchase", "sales"):
+        raise ValueError("Order is ongeldig.")
+    lines = _parse_lines(values.get("lines_json"))
+    relation_id = (values.get("relation_id") or "").strip() or None
+    relation_name = (values.get("relation_name") or "").strip()
+    reference = (values.get("reference") or "").strip()[:120]
+    notes = (values.get("notes") or "").strip()[:5000]
+    order_date = (values.get("order_date") or "").strip() or None
+    relation_table = "suppliers" if expected_type == "purchase" else "customers"
+
+    with server.db() as conn:
+        order = conn.execute(
+            """SELECT id,stockroom_id,order_type,status,reference,relation_name,order_date,inventory_booked_at
+               FROM orders WHERE id=%s AND stockroom_id=%s FOR UPDATE""",
+            (order_id, session["stockroom_id"]),
+        ).fetchone()
+        if not order or order["order_type"] != expected_type:
+            raise PermissionError("Order niet gevonden.")
+        if relation_id:
+            relation = conn.execute(
+                f"SELECT name FROM {relation_table} WHERE id=%s AND stockroom_id=%s",
+                (relation_id, session["stockroom_id"]),
+            ).fetchone()
+            if not relation:
+                raise PermissionError("Relatie hoort niet bij deze stockroom.")
+            relation_name = relation["name"]
+
+        _validate_invoice_balance(conn, session["stockroom_id"], order_id, lines)
+        old_lines = conn.execute(
+            """SELECT item_id,item_name,sku,quantity::float8,unit_price::float8
+               FROM order_lines WHERE order_id=%s ORDER BY created_at,id""",
+            (order_id,),
+        ).fetchall()
+        room = None
+        state = None
+        if order["inventory_booked_at"] is not None:
+            room = conn.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE", (session["stockroom_id"],)).fetchone()
+            if not room:
+                raise PermissionError("Stockroom niet gevonden.")
+            state = room["state"] or {"items": [], "transactions": []}
+            _reverse_inventory_booking(conn, session, order, old_lines, state)
+
+        conn.execute(
+            """UPDATE orders SET relation_id=%s,relation_name=%s,reference=%s,notes=%s,
+                      order_date=COALESCE(%s::date,order_date),updated_at=NOW() WHERE id=%s""",
+            (relation_id, relation_name, reference, notes, order_date, order_id),
+        )
+        conn.execute("DELETE FROM order_lines WHERE order_id=%s", (order_id,))
+        for item_id, item_name, sku, qty, price in lines:
+            conn.execute(
+                "INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+                (str(uuid.uuid4()), order_id, item_id, item_name, sku, qty, price),
+            )
+
+        if room is not None:
+            updated_order = dict(order)
+            updated_order.update(relation_name=relation_name, order_date=order_date or str(order["order_date"]))
+            new_lines = [dict(item_id=i, item_name=n, sku=s, quantity=q, unit_price=p) for i, n, s, q, p in lines]
+            _book_inventory(conn, session, updated_order, new_lines, state)
+            if expected_type == "sales" and order["status"] == "paid":
+                conn.execute(
+                    "UPDATE stockrooms SET state=jsonb_set(state,'{transactions}',(SELECT jsonb_agg(CASE WHEN tx->>'orderId'=%s THEN tx||'{\"done\":true}'::jsonb ELSE tx END) FROM jsonb_array_elements(state->'transactions') tx)) WHERE id=%s",
+                    (order_id, session["stockroom_id"]),
+                )
+
+        conn.execute(
+            "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
+            (session["stockroom_id"], session["user_id"], "order.updated", json.dumps({"id": order_id, "type": expected_type, "lines": len(lines), "invoiceSynced": True})),
+        )
+        conn.commit()
+    return order_id
+
+
 def _find_state_item(state, item_id):
     return next((item for item in state.get("items", []) if str(item.get("id")) == str(item_id)), None)
 
@@ -350,3 +460,4 @@ def update_order_status(session, expected_type, values):
         )
         conn.commit()
     return expected_type
+

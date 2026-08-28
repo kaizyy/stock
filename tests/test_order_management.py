@@ -21,6 +21,10 @@ class OrderPermissionTests(unittest.TestCase):
         self.assertTrue(order_management.allowed("viewer", "read_purchase"))
         self.assertFalse(order_management.allowed("viewer", "write_purchase"))
 
+    def test_parse_lines_preserves_editable_values(self):
+        lines = order_management._parse_lines('[{"item_id":"i1","item_name":"Item A","sku":"A","quantity":2.5,"unit_price":12.75}]')
+        self.assertEqual(lines, [("i1", "Item A", "A", 2.5, 12.75)])
+
 
 @unittest.skipUnless(DB_URL, "TEST_DATABASE_URL is required")
 class OrderTenantTests(unittest.TestCase):
@@ -75,3 +79,4 @@ class OrderTenantTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
