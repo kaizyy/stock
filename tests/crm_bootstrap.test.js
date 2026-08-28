@@ -9,4 +9,7 @@ const refresh = source.lastIndexOf('refresh();');
 assert.ok(install >= 0, 'de CRM-interface moet worden geïnstalleerd');
 assert.ok(cancelBinding > install, 'het ordervenster moet bestaan voordat gebeurtenissen worden gekoppeld');
 assert.ok(refresh > cancelBinding, 'gegevens worden pas geladen nadat de interface volledig klaarstaat');
+assert.match(source, /bindRelationForm\('supplierForm','supplier'\)/, 'leveranciers krijgen een directe opslaghandler');
+assert.match(source, /bindRelationForm\('customerForm','customer'\)/, 'klanten krijgen een directe opslaghandler');
+assert.match(source, /keepRelationsOpen\(\)/, 'opslaan houdt het relatiescherm actief');
 

@@ -59,13 +59,13 @@
   }
 
   async function saveRelation(form,kind){const button=form.querySelector('button[type="submit"]');button.disabled=true;try{const saved=await api(`/api/${kind==='supplier'?'suppliers':'customers'}`,{method:'POST',body:new FormData(form)});if(!saved.relation?.id)throw new Error('De database heeft de relatie niet bevestigd.');form.reset();const rows=kind==='supplier'?suppliers:customers;const index=rows.findIndex(row=>row.id===saved.relation.id);if(index>=0)rows[index]=saved.relation;else rows.push(saved.relation);renderRelations(kind,rows);message(`${kind==='supplier'?'Leverancier':'Klant'} opgeslagen in de database.`)}catch(e){message(e.message,true)}finally{button.disabled=false}}
+  function keepRelationsOpen(){document.querySelectorAll('.view').forEach(view=>view.classList.toggle('active-view',view.id==='relations'));document.querySelectorAll('.nav-item[data-view]').forEach(item=>item.classList.toggle('active',item.dataset.view==='relations'));const title=document.getElementById('pageTitle');if(title)title.textContent='Relaties'}
+  function bindRelationForm(id,kind){const form=document.getElementById(id);form.addEventListener('submit',async e=>{e.preventDefault();e.stopPropagation();await saveRelation(form,kind);keepRelationsOpen()})}
   function editRelation(kind,id){const rows=kind==='supplier'?suppliers:customers;const r=rows.find(x=>x.id===id);if(!r)return;const form=document.getElementById(kind==='supplier'?'supplierForm':'customerForm');['id','name','contact_name','email','phone','address','notes'].forEach(k=>{if(form.elements[k])form.elements[k].value=r[k]||''});form.scrollIntoView({behavior:'smooth',block:'center'});form.elements.name.focus()}
   function openOrder(type,order=null){const dialog=document.getElementById('orderDialog'),form=document.getElementById('orderForm');form.reset();document.getElementById('orderId').value=order?.id||'';document.getElementById('orderType').value=type;document.getElementById('orderDialogTitle').textContent=order?(type==='purchase'?'Inkooporder bewerken':'Verkooporder bewerken'):(type==='purchase'?'Nieuwe inkooporder':'Nieuwe verkooporder');const rel=type==='purchase'?suppliers:customers;document.getElementById('orderRelation').innerHTML='<option value="">Geen relatie</option>'+rel.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');document.getElementById('orderRelation').value=order?.relation_id||'';form.elements.reference.value=order?.reference||'';form.elements.notes.value=order?.notes||'';document.getElementById('orderDate').value=order?.order_date?.slice(0,10)||new Date().toISOString().slice(0,10);document.getElementById('orderLines').innerHTML='';(order?.lines?.length?order.lines:[null]).forEach(line=>addLine(type,line));dialog.showModal()}
   function closeOrder(){document.getElementById('orderForm').reset();document.getElementById('orderId').value='';document.getElementById('orderDialog').close()}
 
   document.addEventListener('submit',async e=>{
-    if(e.target.id==='supplierForm'){e.preventDefault();await saveRelation(e.target,'supplier');return}
-    if(e.target.id==='customerForm'){e.preventDefault();await saveRelation(e.target,'customer');return}
     if(e.target.id==='orderForm'){
       e.preventDefault();const form=e.target,type=document.getElementById('orderType').value;const lines=[...document.querySelectorAll('.order-line')].map(row=>{const opt=row.querySelector('.line-item').selectedOptions[0];return{item_id:opt?.value,item_name:opt?.dataset.name,sku:opt?.dataset.sku,quantity:Number(row.querySelector('.line-qty').value),unit_price:Number(row.querySelector('.line-price').value)}});const body=new FormData(form);body.set('order_type',type);body.set('relation_name',document.getElementById('orderRelation').selectedOptions[0]?.textContent||'');body.set('lines_json',JSON.stringify(lines));try{const saved=await api('/api/orders',{method:'POST',body});closeOrder();message(saved.updated?'Order en gekoppelde factuur bijgewerkt.':`Order ${saved.order_number||''} opgeslagen.`.trim());await refresh()}catch(err){message(err.message,true)}
     }
@@ -74,6 +74,8 @@
   document.addEventListener('change',async e=>{const s=e.target.closest('[data-order-status]');if(!s)return;const body=new FormData();body.set('order_id',s.dataset.orderStatus);body.set('order_type',s.dataset.orderType);body.set('status',s.value);try{await api('/api/orders/status',{method:'POST',body});message('Orderstatus bijgewerkt.');await refresh()}catch(err){message(err.message,true)}});
 
   installUI();
+  bindRelationForm('supplierForm','supplier');
+  bindRelationForm('customerForm','customer');
   document.getElementById('orderDialog').addEventListener('cancel',e=>{e.preventDefault();closeOrder()});
   refresh();
 })();
