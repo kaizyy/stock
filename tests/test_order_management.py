@@ -52,6 +52,18 @@ class OrderPermissionTests(unittest.TestCase):
         self.assertTrue(any("INSERT INTO customers" in sql for sql in inserts))
         connection.commit.assert_called_once()
 
+    def test_delete_relation_detaches_orders_and_preserves_history(self):
+        connection = mock.MagicMock()
+        connection.__enter__.return_value = connection
+        connection.__exit__.return_value = False
+        connection.execute.side_effect = [mock.MagicMock(fetchone=lambda: {"name": "Klant"}), mock.MagicMock(fetchall=lambda: [{"id": "order-1"}]), mock.MagicMock(), mock.MagicMock()]
+        with mock.patch("order_management.server.db", return_value=connection):
+            result = order_management.delete_relation({"stockroom_id": "room-1", "user_id": "user-1"}, "customer", "relation-1")
+        statements = [call.args[0] for call in connection.execute.call_args_list]
+        self.assertTrue(any("UPDATE orders SET relation_id=NULL" in sql for sql in statements))
+        self.assertTrue(any("DELETE FROM customers" in sql for sql in statements))
+        self.assertEqual(result["orders_detached"], 1)
+
 
 @unittest.skipUnless(DB_URL, "TEST_DATABASE_URL is required")
 class OrderTenantTests(unittest.TestCase):

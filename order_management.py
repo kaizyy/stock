@@ -141,6 +141,31 @@ def save_relation(session, kind, values):
     return relation_id
 
 
+def delete_relation(session, kind, relation_id):
+    table = "suppliers" if kind == "supplier" else "customers"
+    relation_id = (relation_id or "").strip()
+    if not relation_id:
+        raise ValueError("Relatie is ongeldig.")
+    with server.db() as conn:
+        relation = conn.execute(
+            f"SELECT name FROM {table} WHERE id=%s AND stockroom_id=%s FOR UPDATE",
+            (relation_id, session["stockroom_id"]),
+        ).fetchone()
+        if not relation:
+            raise PermissionError("Relatie niet gevonden.")
+        detached = conn.execute(
+            "UPDATE orders SET relation_id=NULL,updated_at=NOW() WHERE relation_id=%s AND stockroom_id=%s RETURNING id",
+            (relation_id, session["stockroom_id"]),
+        ).fetchall()
+        conn.execute(f"DELETE FROM {table} WHERE id=%s AND stockroom_id=%s", (relation_id, session["stockroom_id"]))
+        conn.execute(
+            "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
+            (session["stockroom_id"], session["user_id"], f"{kind}.deleted", json.dumps({"id": relation_id, "name": relation["name"], "ordersDetached": len(detached)})),
+        )
+        conn.commit()
+    return {"deleted": True, "id": relation_id, "orders_detached": len(detached)}
+
+
 def order_rows(stockroom_id, order_type):
     with server.db() as conn:
         rows = conn.execute(

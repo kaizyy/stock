@@ -51,7 +51,7 @@ class ExtendedHandler(app_runner.AppHandler):
         if path in ("/","/index.html"):
             session=self.require_session(api=False)
             if not session:return
-            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260828-4"></script><script src="/settings_tools.js?v=20260828-4"></script><script src="/features.js?v=20260828-4"></script><script src="/features_optional_fix.js?v=20260828-4"></script><script src="/role_dashboard.js?v=20260828-4"></script><script src="/analytics_dashboard.js?v=20260828-4"></script><script src="/inventory_intelligence.js?v=20260828-4"></script><script src="/barcode_scanner_fallback.js?v=20260828-4"></script><script src="/dynamic_navigation.js?v=20260828-4"></script><script src="/crm_orders.js?v=20260828-4"></script><script src="/order_delete_ui.js?v=20260828-4"></script><script src="/warehouse_ops.js?v=20260828-4"></script><script src="/business_tools.js?v=20260828-4"></script><script src="/platform_admin_ui.js?v=20260828-4"></script><script src="/billing_ui.js?v=20260828-4"></script></body>');self.send_html(200,content);return
+            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260828-5"></script><script src="/settings_tools.js?v=20260828-5"></script><script src="/features.js?v=20260828-5"></script><script src="/features_optional_fix.js?v=20260828-5"></script><script src="/role_dashboard.js?v=20260828-5"></script><script src="/analytics_dashboard.js?v=20260828-5"></script><script src="/inventory_intelligence.js?v=20260828-5"></script><script src="/barcode_scanner_fallback.js?v=20260828-5"></script><script src="/dynamic_navigation.js?v=20260828-5"></script><script src="/crm_orders.js?v=20260828-5"></script><script src="/order_delete_ui.js?v=20260828-5"></script><script src="/warehouse_ops.js?v=20260828-5"></script><script src="/business_tools.js?v=20260828-5"></script><script src="/platform_admin_ui.js?v=20260828-5"></script><script src="/billing_ui.js?v=20260828-5"></script></body>');self.send_html(200,content);return
         if path=="/api/account/sessions":
             s=self.require_session(api=True)
             if s:
@@ -133,7 +133,7 @@ class ExtendedHandler(app_runner.AppHandler):
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/orders","/api/orders/status","/api/orders/delete","/api/warehouse/count","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
+        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/warehouse/count","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -157,6 +157,10 @@ class ExtendedHandler(app_runner.AppHandler):
                     if not orders.allowed(s['role'],cap):self.send_json(403,{"error":"Geen rechten."});return
                     relation_id=orders.save_relation(s,kind,values);relation=orders.relation_row(s['stockroom_id'],kind,relation_id)
                     self.send_json(200,{"saved":True,"id":relation_id,"relation":relation});return
+                if path=="/api/relations/delete":
+                    kind=values.get('kind');cap="write_suppliers" if kind=='supplier' else "write_customers"
+                    if kind not in ('supplier','customer') or not orders.allowed(s['role'],cap):self.send_json(403,{"error":"Geen rechten om deze relatie te verwijderen."});return
+                    self.send_json(200,orders.delete_relation(s,kind,values.get('relation_id')));return
                 if path=="/api/orders":
                     ot=values.get('order_type');cap='write_purchase' if ot=='purchase' else 'write_sales'
                     if ot not in ('purchase','sales') or not orders.allowed(s['role'],cap):self.send_json(403,{"error":"Geen rechten voor dit ordertype."});return
