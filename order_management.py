@@ -105,6 +105,8 @@ def save_relation(session, kind, values):
         name = next((value for value in payload[:3] if value), "")
     if not name and not any(payload):
         raise ValueError("Vul minimaal één relatiegegeven in.")
+    if not name:
+        name = "Naamloze leverancier" if kind == "supplier" else "Naamloze klant"
     name = name[:200]
     with server.db() as conn:
         if relation_id:

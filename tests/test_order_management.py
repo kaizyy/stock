@@ -1,6 +1,7 @@
 import os
 import unittest
 import uuid
+from unittest import mock
 
 import order_management
 import runner
@@ -30,6 +31,24 @@ class OrderPermissionTests(unittest.TestCase):
         payload = tuple((values.get(k) or "").strip()[:5000] for k in ("contact_name", "email", "phone", "address", "notes"))
         name = (values.get("name") or "").strip() or next((value for value in payload[:3] if value), "")
         self.assertEqual(name, "Jan Jansen")
+
+    def test_address_only_relation_gets_visible_fallback_name(self):
+        values = {"name": "", "contact_name": "", "email": "", "phone": "", "address": "Dorpsstraat 1", "notes": ""}
+        payload = tuple((values.get(k) or "").strip()[:5000] for k in ("contact_name", "email", "phone", "address", "notes"))
+        name = next((value for value in payload[:3] if value), "") or "Naamloze leverancier"
+        self.assertEqual(name, "Naamloze leverancier")
+
+    def test_partial_relation_is_inserted_and_committed(self):
+        connection = mock.MagicMock()
+        connection.__enter__.return_value = connection
+        connection.__exit__.return_value = False
+        session = {"stockroom_id": "room-1", "user_id": "user-1"}
+        with mock.patch("order_management.server.db", return_value=connection):
+            relation_id = order_management.save_relation(session, "customer", {"address": "Dorpsstraat 1"})
+        self.assertTrue(relation_id)
+        inserts = [call.args[0] for call in connection.execute.call_args_list]
+        self.assertTrue(any("INSERT INTO customers" in sql for sql in inserts))
+        connection.commit.assert_called_once()
 
 
 @unittest.skipUnless(DB_URL, "TEST_DATABASE_URL is required")
