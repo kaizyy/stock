@@ -71,9 +71,10 @@
     }
   });
   document.addEventListener('click',e=>{const n=e.target.closest('[data-new-order]');if(n)openOrder(n.dataset.newOrder);const orderEdit=e.target.closest('[data-edit-order]');if(orderEdit){const rows=orderEdit.dataset.orderType==='purchase'?purchaseOrders:salesOrders;openOrder(orderEdit.dataset.orderType,rows.find(o=>o.id===orderEdit.dataset.editOrder))}const edit=e.target.closest('[data-edit-relation]');if(edit)editRelation(edit.dataset.editRelation,edit.dataset.id);if(e.target.closest('.cancel-order'))closeOrder();if(e.target.id==='addOrderLine')addLine(document.getElementById('orderType').value);if(e.target.closest('.remove-order-line'))e.target.closest('.order-line').remove()});
-  document.getElementById('orderDialog').addEventListener('cancel',e=>{e.preventDefault();closeOrder()});
   document.addEventListener('change',async e=>{const s=e.target.closest('[data-order-status]');if(!s)return;const body=new FormData();body.set('order_id',s.dataset.orderStatus);body.set('order_type',s.dataset.orderType);body.set('status',s.value);try{await api('/api/orders/status',{method:'POST',body});message('Orderstatus bijgewerkt.');await refresh()}catch(err){message(err.message,true)}});
 
-  installUI(); refresh();
+  installUI();
+  document.getElementById('orderDialog').addEventListener('cancel',e=>{e.preventDefault();closeOrder()});
+  refresh();
 })();
 

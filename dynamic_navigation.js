@@ -8,6 +8,7 @@
     settings: 'Instellingen',
     relations: 'Relaties',
     orders: 'Orders',
+    finance: 'Facturen',
     warehouse: 'Magazijn',
     notifications: 'Meldingen',
     platformAdmin: 'Platformbeheer'
@@ -48,3 +49,4 @@
     activateView(id);
   });
 })();
+
