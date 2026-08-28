@@ -99,10 +99,13 @@ def relation_rows(stockroom_id, kind):
 def save_relation(session, kind, values):
     table = "suppliers" if kind == "supplier" else "customers"
     name = (values.get("name") or "").strip()
-    if not name:
-        raise ValueError("Naam is verplicht.")
     relation_id = (values.get("id") or "").strip()
     payload = tuple((values.get(k) or "").strip()[:5000] for k in ("contact_name", "email", "phone", "address", "notes"))
+    if not name:
+        name = next((value for value in payload[:3] if value), "")
+    if not name and not any(payload):
+        raise ValueError("Vul minimaal één relatiegegeven in.")
+    name = name[:200]
     with server.db() as conn:
         if relation_id:
             row = conn.execute(

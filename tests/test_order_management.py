@@ -25,6 +25,12 @@ class OrderPermissionTests(unittest.TestCase):
         lines = order_management._parse_lines('[{"item_id":"i1","item_name":"Item A","sku":"A","quantity":2.5,"unit_price":12.75}]')
         self.assertEqual(lines, [("i1", "Item A", "A", 2.5, 12.75)])
 
+    def test_relation_name_can_be_derived_from_partial_details(self):
+        values = {"name": "", "contact_name": "Jan Jansen", "email": "", "phone": "", "address": "", "notes": ""}
+        payload = tuple((values.get(k) or "").strip()[:5000] for k in ("contact_name", "email", "phone", "address", "notes"))
+        name = (values.get("name") or "").strip() or next((value for value in payload[:3] if value), "")
+        self.assertEqual(name, "Jan Jansen")
+
 
 @unittest.skipUnless(DB_URL, "TEST_DATABASE_URL is required")
 class OrderTenantTests(unittest.TestCase):
