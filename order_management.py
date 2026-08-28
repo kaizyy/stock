@@ -96,6 +96,15 @@ def relation_rows(stockroom_id, kind):
         ).fetchall()
 
 
+def relation_row(stockroom_id, kind, relation_id):
+    table = "suppliers" if kind == "supplier" else "customers"
+    with server.db() as conn:
+        return conn.execute(
+            f"SELECT id::text,name,contact_name,email,phone,address,notes,created_at,updated_at FROM {table} WHERE id=%s AND stockroom_id=%s",
+            (relation_id, stockroom_id),
+        ).fetchone()
+
+
 def save_relation(session, kind, values):
     table = "suppliers" if kind == "supplier" else "customers"
     name = (values.get("name") or "").strip()
@@ -127,6 +136,8 @@ def save_relation(session, kind, values):
             (session["stockroom_id"], session["user_id"], f"{kind}.saved", json.dumps({"id": relation_id, "name": name})),
         )
         conn.commit()
+    if not relation_row(session["stockroom_id"], kind, relation_id):
+        raise RuntimeError("Relatie kon niet in de database worden bevestigd.")
     return relation_id
 
 

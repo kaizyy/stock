@@ -44,7 +44,9 @@ class OrderPermissionTests(unittest.TestCase):
         connection.__exit__.return_value = False
         session = {"stockroom_id": "room-1", "user_id": "user-1"}
         with mock.patch("order_management.server.db", return_value=connection):
-            relation_id = order_management.save_relation(session, "customer", {"address": "Dorpsstraat 1"})
+            connection.execute.return_value.fetchone.return_value = {"id": "saved-id"}
+            with mock.patch("order_management.relation_row", return_value={"id": "saved-id"}):
+                relation_id = order_management.save_relation(session, "customer", {"address": "Dorpsstraat 1"})
         self.assertTrue(relation_id)
         inserts = [call.args[0] for call in connection.execute.call_args_list]
         self.assertTrue(any("INSERT INTO customers" in sql for sql in inserts))
