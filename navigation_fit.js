@@ -9,6 +9,11 @@
       .sidebar nav{display:flex!important;flex-direction:column;gap:4px!important;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.25) transparent}
       .sidebar .nav-item{min-height:38px;padding:8px 10px!important;border-radius:9px;line-height:1.15}
       .sidebar .nav-item span{font-size:16px}
+      .sidebar .nav-item.active,.sidebar .nav-item[aria-current="page"]{background:#fff!important;color:#173f32!important;font-weight:800!important;box-shadow:inset 4px 0 0 #e7c684,0 5px 14px rgba(4,24,16,.18)}
+      .sidebar .nav-item.active>span:first-child,.sidebar .nav-item[aria-current="page"]>span:first-child{color:#a96518;transform:scale(1.08)}
+      .sidebar .ux-nav-group.active:not(.open){background:rgba(255,255,255,.16)!important;color:#fff!important;box-shadow:inset 4px 0 0 #e7c684}
+      .trade-sidebar-submenu .nav-item.active,.settings-sidebar-submenu button.active{background:rgba(231,198,132,.2)!important;color:#fff!important;box-shadow:inset 3px 0 0 #e7c684;font-weight:800!important}
+      .sidebar .nav-item,.sidebar .nav-item>span:first-child{transition:background-color .16s ease,color .16s ease,box-shadow .16s ease,transform .16s ease}
       .sidebar-note{flex:0 0 auto;padding:12px 5px 0;margin-top:10px}
       main{width:100%;max-width:100%;overflow-x:hidden;padding:24px clamp(16px,3vw,48px) 48px}
       .topbar{margin-bottom:22px}.section-head{gap:12px;flex-wrap:wrap}
@@ -28,6 +33,13 @@
     const visible=[...nav.querySelectorAll(':scope > .nav-item:not([hidden])')].length;
     document.documentElement.classList.toggle('nav-tight',innerHeight<820||visible>8);
     nav.querySelectorAll('.nav-item').forEach(item=>{const label=item.textContent.replace(/\s+/g,' ').trim();if(label)item.title=label});
+    syncActive(nav);
+  }
+  function syncActive(nav=document.querySelector('.sidebar nav')){
+    if(!nav)return;
+    nav.querySelectorAll('.nav-item[data-view]').forEach(item=>item.classList.contains('active')?item.setAttribute('aria-current','page'):item.removeAttribute('aria-current'));
+    const active=nav.querySelector('.nav-item[data-view].active');
+    if(active?.closest('#tradeSidebarSubmenu'))document.getElementById('tradeNavGroup')?.classList.add('active');
   }
   function closeOtherMenus(clicked){
     if(clicked?.closest('#tradeNavGroup'))document.getElementById('settingsSidebarSubmenu')?.classList.remove('open');
@@ -35,7 +47,7 @@
   }
   installStyles();window.addEventListener('resize',fit,{passive:true});window.addEventListener('load',fit);
   document.addEventListener('click',event=>{closeOtherMenus(event.target);setTimeout(fit,0)});
-  new MutationObserver(()=>requestAnimationFrame(fit)).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']});
+  new MutationObserver(()=>requestAnimationFrame(fit)).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']});
   fit();
 })();
 
