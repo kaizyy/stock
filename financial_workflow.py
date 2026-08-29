@@ -157,6 +157,19 @@ def restore_invoice(session,order_id):
         conn.commit()
     return {'restored':True,'order_id':order_id,'invoice_number':invoice['invoice_number']}
 
+def permanently_delete_invoice(session,order_id):
+    order_id=(order_id or '').strip()
+    if not order_id:raise ValueError('Factuur is ongeldig.')
+    with server.db() as conn:
+        invoice=conn.execute("SELECT invoice_number FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NOT NULL FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
+        if not invoice:raise PermissionError('Factuur staat niet in de prullenbak.')
+        payments=conn.execute("DELETE FROM invoice_payments WHERE order_id=%s AND stockroom_id=%s RETURNING id",(order_id,session['stockroom_id'])).fetchall()
+        credits=conn.execute("DELETE FROM credit_notes WHERE order_id=%s AND stockroom_id=%s RETURNING id",(order_id,session['stockroom_id'])).fetchall()
+        conn.execute("DELETE FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NOT NULL",(order_id,session['stockroom_id']))
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'invoice.permanently_deleted',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'order_id':order_id,'invoice_number':invoice['invoice_number'],'payments_deleted':len(payments),'credits_deleted':len(credits),'order_preserved':True})))
+        conn.commit()
+    return {'deleted':True,'order_id':order_id,'invoice_number':invoice['invoice_number']}
+
 def _wrap_order_status():
     global _original_update_order_status
     import order_management
@@ -199,14 +212,14 @@ def install():
         return old_get(self)
     def do_POST(self):
         path=urllib.parse.urlparse(self.path).path
-        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete','/api/finance/restore'):
+        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete','/api/finance/restore','/api/finance/delete-permanently'):
             if not self.enforce_origin():return
             s=self.require_session(api=True)
             if not s:return
             if s.get('role') not in ('owner','admin','member','seller'):self.send_json(403,{'error':'Geen rechten.'});return
             f=self.form_data() or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
             try:
-                res=record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else restore_invoice(s,v.get('order_id')) if path.endswith('/restore') else send_reminder(s,v.get('order_id'))
+                res=record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else permanently_delete_invoice(s,v.get('order_id')) if path.endswith('/delete-permanently') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else restore_invoice(s,v.get('order_id')) if path.endswith('/restore') else send_reminder(s,v.get('order_id'))
                 self.send_json(200,res)
             except PermissionError as e:self.send_json(403,{'error':str(e)})
             except ValueError as e:self.send_json(400,{'error':str(e)})

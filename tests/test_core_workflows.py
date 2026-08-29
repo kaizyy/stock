@@ -78,6 +78,17 @@ class CoreWorkflowRegressionTests(unittest.TestCase):
         financial_workflow.restore_invoice(self.session, order_id)
         restored = next(row for row in financial_workflow.list_invoices(str(self.room_id)) if row["order_id"] == order_id)
         self.assertEqual(restored["paid_amount"], 5)
+
+    def test_invoice_can_be_permanently_deleted_from_trash(self):
+        order_id = self.create_sales_order(quantity=1)
+        documents_v3.ensure_invoice(str(self.room_id), order_id)
+        financial_workflow.record_payment(self.session, order_id, 5, "Testbetaling")
+        financial_workflow.delete_invoice(self.session, order_id)
+        financial_workflow.permanently_delete_invoice(self.session, order_id)
+        with server.db() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM invoice_documents WHERE order_id=%s", (order_id,)).fetchone())
+            self.assertIsNone(conn.execute("SELECT 1 FROM invoice_payments WHERE order_id=%s", (order_id,)).fetchone())
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM orders WHERE id=%s", (order_id,)).fetchone())
         with server.db() as conn:
             self.assertIsNotNone(conn.execute("SELECT id FROM orders WHERE id=%s", (order_id,)).fetchone())
 
@@ -114,6 +125,14 @@ class CoreWorkflowRegressionTests(unittest.TestCase):
             self.assertIsNone(conn.execute("SELECT 1 FROM quote_reservations WHERE quote_id=%s",(q["id"],)).fetchone())
             order_reservation=conn.execute("SELECT quantity::float8 FROM inventory_reservations WHERE order_id=%s",(paid["order_id"],)).fetchone()
         self.assertEqual(order_reservation["quantity"],4)
+
+    def test_deleting_quote_releases_its_reservation(self):
+        q=sales_workflow.create(self.session,{"relation_name":"Offerteklant","lines_json":json.dumps([{"item_id":"item-1","item_name":"Testartikel","sku":"T-1","quantity":3,"unit_price":12}])})
+        sales_workflow.convert(self.session,q["id"])
+        sales_workflow.delete_quote(self.session,q["id"])
+        with server.db() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM quotes WHERE id=%s",(q["id"],)).fetchone())
+            self.assertIsNone(conn.execute("SELECT 1 FROM quote_reservations WHERE quote_id=%s",(q["id"],)).fetchone())
 
 
 if __name__ == "__main__":

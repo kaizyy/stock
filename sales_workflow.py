@@ -28,6 +28,15 @@ def create(session,v):
         for i,n,s,q,p in lines:c.execute("INSERT INTO quote_lines(id,quote_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",(str(uuid.uuid4()),qid,i,n,s,q,p))
         c.commit()
     return {'created':True,'id':qid,'quote_number':number}
+def delete_quote(session,qid):
+    with server.db() as c:
+        q=c.execute("SELECT quote_number,converted_order_id FROM quotes WHERE id=%s AND stockroom_id=%s FOR UPDATE",(qid,session['stockroom_id'])).fetchone()
+        if not q:raise PermissionError('Offerte niet gevonden.')
+        c.execute("DELETE FROM quote_reservations WHERE quote_id=%s AND stockroom_id=%s",(qid,session['stockroom_id']))
+        c.execute("DELETE FROM quotes WHERE id=%s AND stockroom_id=%s",(qid,session['stockroom_id']))
+        c.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'quote.deleted',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':qid,'quote_number':q['quote_number'],'converted_order_preserved':bool(q['converted_order_id'])})))
+        c.commit()
+    return {'deleted':True,'id':qid}
 def convert(session,qid):
     with server.db() as c:
         q=c.execute("SELECT * FROM quotes WHERE id=%s AND stockroom_id=%s FOR UPDATE",(qid,session['stockroom_id'])).fetchone()
@@ -117,12 +126,12 @@ def install():
         return og(self)
     def post(self):
         path=urllib.parse.urlparse(self.path).path
-        if path in ('/api/quotes','/api/quotes/convert','/api/quotes/mail'):
+        if path in ('/api/quotes','/api/quotes/convert','/api/quotes/mail','/api/quotes/delete'):
             if not self.enforce_origin():return
             s=self.require_session(api=True)
             if not s:return
             f=self.form_data() or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
-            try:self.send_json(200,create(s,v) if path=='/api/quotes' else convert(s,v.get('id')) if path.endswith('convert') else mail(s,v.get('id')))
+            try:self.send_json(200,create(s,v) if path=='/api/quotes' else convert(s,v.get('id')) if path.endswith('convert') else delete_quote(s,v.get('id')) if path.endswith('delete') else mail(s,v.get('id')))
             except (ValueError,PermissionError) as e:self.send_json(400,{'error':str(e)})
             return
         return op(self)
