@@ -104,8 +104,8 @@ class OrderTenantTests(unittest.TestCase):
             order_management.create_order(self.session_a,{"order_type":"purchase","relation_id":supplier_b,"status":"draft","lines_json":'[{"item_id":"i1","item_name":"Item","sku":"SKU","quantity":1,"unit_price":5}]'})
 
     def test_order_rows_are_tenant_scoped(self):
-        order_management.create_order(self.session_a,{"order_type":"sales","relation_name":"A customer","status":"draft","reference":"A-1","lines_json":'[{"item_id":"i1","item_name":"Item A","sku":"A","quantity":2,"unit_price":10}]'})
-        order_management.create_order(self.session_b,{"order_type":"sales","relation_name":"B customer","status":"draft","reference":"B-1","lines_json":'[{"item_id":"i2","item_name":"Item B","sku":"B","quantity":1,"unit_price":20}]'})
+        order_management.create_order(self.session_a,{"order_type":"sales","relation_name":"A customer","status":"cancelled","reference":"A-1","lines_json":'[{"item_id":"i1","item_name":"Item A","sku":"A","quantity":2,"unit_price":10}]'})
+        order_management.create_order(self.session_b,{"order_type":"sales","relation_name":"B customer","status":"cancelled","reference":"B-1","lines_json":'[{"item_id":"i2","item_name":"Item B","sku":"B","quantity":1,"unit_price":20}]'})
         a=order_management.order_rows(str(self.room_a),"sales")
         self.assertEqual(len(a),1)
         self.assertEqual(a[0]["reference"],"A-1")

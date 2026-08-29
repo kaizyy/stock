@@ -65,15 +65,12 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(len([t for t in state["transactions"] if t.get("orderId") == order_id]), 1)
 
     def test_sales_completed_rejects_insufficient_stock(self):
-        order_id = self.create_order("sales", 11, 10)
         with self.assertRaises(ValueError):
-            order_management.update_order_status(self.session, "sales", {"order_id": order_id, "status": "completed"})
+            self.create_order("sales", 11, 10)
         state = self.get_state()
         self.assertEqual(state["items"][0]["stock"], 10)
         with server.db() as conn:
-            order = conn.execute("SELECT status,inventory_booked_at FROM orders WHERE id=%s", (order_id,)).fetchone()
-        self.assertEqual(order["status"], "draft")
-        self.assertIsNone(order["inventory_booked_at"])
+            self.assertEqual(conn.execute("SELECT COUNT(*) count FROM orders WHERE stockroom_id=%s",(self.room_id,)).fetchone()["count"],0)
 
     def test_purchase_received_books_once_and_cannot_go_back(self):
         order_id = self.create_order("purchase", 5, 3.5)
@@ -90,3 +87,4 @@ class OrderInventoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
