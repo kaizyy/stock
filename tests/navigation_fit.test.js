@@ -8,5 +8,10 @@ assert(source.includes("closeOtherMenus"));
 assert(source.includes('aria-current'));
 assert(source.includes('syncActive(nav)'));
 assert(source.includes('inset 4px 0 0 #e7c684'));
+assert(source.includes('Start & inzicht'));
+assert(source.includes('Voorraad & magazijn'));
+assert(source.includes('Handel & facturen'));
+assert(source.includes('Organisatie & beheer'));
+assert(source.includes('function categorize'));
 console.log('navigation fit checks passed');
 
