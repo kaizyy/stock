@@ -258,7 +258,7 @@ def create_order(session, values):
 
 def _validate_invoice_balance(conn, stockroom_id, order_id, lines):
     invoice = conn.execute(
-        "SELECT vat_percent::float8,paid_amount::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s",
+        "SELECT vat_percent::float8,paid_amount::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL",
         (order_id, stockroom_id),
     ).fetchone()
     if not invoice:

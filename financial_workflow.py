@@ -13,6 +13,8 @@ def initialize():
         conn.execute("ALTER TABLE invoice_documents ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ")
         conn.execute("ALTER TABLE invoice_documents ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ")
         conn.execute("ALTER TABLE invoice_documents ADD COLUMN IF NOT EXISTS reminder_count INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE invoice_documents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE invoice_documents ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id) ON DELETE SET NULL")
         conn.execute("CREATE TABLE IF NOT EXISTS invoice_payments(id UUID PRIMARY KEY,order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,amount NUMERIC(14,2) NOT NULL CHECK(amount>0),note TEXT NOT NULL DEFAULT '',created_by UUID REFERENCES users(id) ON DELETE SET NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
         conn.execute("CREATE TABLE IF NOT EXISTS credit_sequences(stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,year INTEGER NOT NULL,last_value INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(stockroom_id,year))")
         conn.execute("CREATE TABLE IF NOT EXISTS credit_notes(id UUID PRIMARY KEY,stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,credit_number TEXT NOT NULL,amount NUMERIC(14,2) NOT NULL CHECK(amount>0),reason TEXT NOT NULL DEFAULT '',created_by UUID REFERENCES users(id) ON DELETE SET NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(stockroom_id,credit_number))")
@@ -35,7 +37,7 @@ def list_invoices(stockroom_id):
         JOIN orders o ON o.id=i.order_id
         LEFT JOIN line_totals lt ON lt.order_id=i.order_id
         LEFT JOIN credits c ON c.order_id=i.order_id
-        WHERE i.stockroom_id=%s
+        WHERE i.stockroom_id=%s AND i.deleted_at IS NULL
         ORDER BY i.invoice_date DESC,i.created_at DESC
         """,(stockroom_id,stockroom_id)).fetchall()
     out=[]
@@ -52,7 +54,7 @@ def list_invoices(stockroom_id):
     return out
 
 def _invoice_total(conn,stockroom_id,order_id):
-    r=conn.execute("SELECT COALESCE(SUM(l.quantity*l.unit_price),0)::float8 subtotal,i.vat_percent::float8 FROM invoice_documents i LEFT JOIN order_lines l ON l.order_id=i.order_id WHERE i.order_id=%s AND i.stockroom_id=%s GROUP BY i.vat_percent",(order_id,stockroom_id)).fetchone()
+    r=conn.execute("SELECT COALESCE(SUM(l.quantity*l.unit_price),0)::float8 subtotal,i.vat_percent::float8 FROM invoice_documents i LEFT JOIN order_lines l ON l.order_id=i.order_id WHERE i.order_id=%s AND i.stockroom_id=%s AND i.deleted_at IS NULL GROUP BY i.vat_percent",(order_id,stockroom_id)).fetchone()
     if not r:return 0
     return round(float(r['subtotal'] or 0)*(1+float(r['vat_percent'] or 0)/100),2)
 
@@ -61,7 +63,7 @@ def record_payment(session,order_id,amount,note=''):
     if amount<=0:raise ValueError('Bedrag moet groter dan 0 zijn.')
     documents_v3.ensure_invoice(session['stockroom_id'],order_id)
     with server.db() as conn:
-        row=conn.execute("SELECT paid_amount::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
+        row=conn.execute("SELECT paid_amount::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
         if not row:raise PermissionError('Factuur niet gevonden.')
         total=_invoice_total(conn,session['stockroom_id'],order_id)
         credited=float(conn.execute("SELECT COALESCE(SUM(amount),0)::float8 amount FROM credit_notes WHERE order_id=%s AND stockroom_id=%s",(order_id,session['stockroom_id'])).fetchone()['amount'] or 0)
@@ -125,14 +127,30 @@ def delete_invoice(session,order_id):
     order_id=(order_id or '').strip()
     if not order_id:raise ValueError('Factuur is ongeldig.')
     with server.db() as conn:
-        invoice=conn.execute("SELECT invoice_number FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
+        invoice=conn.execute("SELECT invoice_number FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
         if not invoice:raise PermissionError('Factuur niet gevonden.')
-        payments=conn.execute("DELETE FROM invoice_payments WHERE order_id=%s AND stockroom_id=%s RETURNING id",(order_id,session['stockroom_id'])).fetchall()
-        credits=conn.execute("DELETE FROM credit_notes WHERE order_id=%s AND stockroom_id=%s RETURNING id",(order_id,session['stockroom_id'])).fetchall()
-        conn.execute("DELETE FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s",(order_id,session['stockroom_id']))
-        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",(session['stockroom_id'],session['user_id'],'invoice.deleted',json.dumps({'order_id':order_id,'invoice_number':invoice['invoice_number'],'paymentsDeleted':len(payments),'creditsDeleted':len(credits)})))
+        conn.execute("UPDATE invoice_documents SET deleted_at=NOW(),deleted_by=%s WHERE order_id=%s AND stockroom_id=%s",(session['user_id'],order_id,session['stockroom_id']))
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",(session['stockroom_id'],session['user_id'],'invoice.trashed',json.dumps({'order_id':order_id,'invoice_number':invoice['invoice_number'],'orderPreserved':True,'financialHistoryPreserved':True})))
         conn.commit()
-    return {'deleted':True,'order_id':order_id,'invoice_number':invoice['invoice_number']}
+    return {'trashed':True,'order_id':order_id,'invoice_number':invoice['invoice_number']}
+
+def list_deleted_invoices(stockroom_id):
+    with server.db() as conn:
+        return conn.execute("""SELECT i.order_id::text,i.invoice_number,i.invoice_date,i.deleted_at,o.order_number,o.relation_name,
+          (SELECT COUNT(*) FROM invoice_payments p WHERE p.order_id=i.order_id AND p.stockroom_id=i.stockroom_id) payments,
+          (SELECT COUNT(*) FROM credit_notes c WHERE c.order_id=i.order_id AND c.stockroom_id=i.stockroom_id) credits
+          FROM invoice_documents i JOIN orders o ON o.id=i.order_id
+          WHERE i.stockroom_id=%s AND i.deleted_at IS NOT NULL ORDER BY i.deleted_at DESC""",(stockroom_id,)).fetchall()
+
+def restore_invoice(session,order_id):
+    order_id=(order_id or '').strip()
+    if not order_id:raise ValueError('Factuur is ongeldig.')
+    with server.db() as conn:
+        invoice=conn.execute("UPDATE invoice_documents SET deleted_at=NULL,deleted_by=NULL WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NOT NULL RETURNING invoice_number",(order_id,session['stockroom_id'])).fetchone()
+        if not invoice:raise PermissionError('Factuur staat niet in de prullenbak.')
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",(session['stockroom_id'],session['user_id'],'invoice.restored',json.dumps({'order_id':order_id,'invoice_number':invoice['invoice_number']})))
+        conn.commit()
+    return {'restored':True,'order_id':order_id,'invoice_number':invoice['invoice_number']}
 
 def _wrap_order_status():
     global _original_update_order_status
@@ -142,6 +160,9 @@ def _wrap_order_status():
     def wrapped(session,order_type,values):
         result=_original_update_order_status(session,order_type,values)
         if order_type=='sales' and values.get('status') in ('completed','paid'):
+            with server.db() as conn:
+                trashed=conn.execute("SELECT 1 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NOT NULL",(values.get('order_id'),session['stockroom_id'])).fetchone()
+            if trashed:return result
             documents_v3.ensure_invoice(session['stockroom_id'],values.get('order_id'))
             if values.get('status')=='paid':
                 with server.db() as conn:
@@ -160,6 +181,10 @@ def install():
             s=self.require_session(api=True)
             if s:self.send_json(200,{'invoices':list_invoices(s['stockroom_id'])})
             return
+        if p.path=='/api/finance/trash':
+            s=self.require_session(api=True)
+            if s:self.send_json(200,{'invoices':list_deleted_invoices(s['stockroom_id'])})
+            return
         if p.path=='/api/finance/credit.pdf':
             s=self.require_session(api=True)
             if not s:return
@@ -169,14 +194,14 @@ def install():
         return old_get(self)
     def do_POST(self):
         path=urllib.parse.urlparse(self.path).path
-        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete'):
+        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete','/api/finance/restore'):
             if not self.enforce_origin():return
             s=self.require_session(api=True)
             if not s:return
             if s.get('role') not in ('owner','admin','member','seller'):self.send_json(403,{'error':'Geen rechten.'});return
             f=self.form_data() or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
             try:
-                res=record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else send_reminder(s,v.get('order_id'))
+                res=record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else restore_invoice(s,v.get('order_id')) if path.endswith('/restore') else send_reminder(s,v.get('order_id'))
                 self.send_json(200,res)
             except PermissionError as e:self.send_json(403,{'error':str(e)})
             except ValueError as e:self.send_json(400,{'error':str(e)})

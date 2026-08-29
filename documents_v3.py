@@ -76,8 +76,10 @@ def remove_logo(stockroom_id):
 
 def ensure_invoice(stockroom_id, order_id):
     with server.db() as conn:
-        existing=conn.execute("SELECT invoice_number,invoice_date,due_date,vat_percent::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s",(order_id,stockroom_id)).fetchone()
-        if existing:return dict(existing)
+        existing=conn.execute("SELECT invoice_number,invoice_date,due_date,vat_percent::float8,deleted_at FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s",(order_id,stockroom_id)).fetchone()
+        if existing:
+            if existing.get('deleted_at'):raise ValueError('Deze factuur staat in de prullenbak. Herstel de factuur eerst.')
+            return {k:v for k,v in dict(existing).items() if k!='deleted_at'}
         order=conn.execute("SELECT order_type FROM orders WHERE id=%s AND stockroom_id=%s",(order_id,stockroom_id)).fetchone()
         if not order:raise PermissionError('Order niet gevonden.')
         if order['order_type']!='sales':raise ValueError('Facturen zijn alleen beschikbaar voor verkooporders.')
@@ -147,3 +149,4 @@ def install():
             return
         return old_post(self)
     server.StockroomHandler.do_GET=do_GET;server.StockroomHandler.do_POST=do_POST
+

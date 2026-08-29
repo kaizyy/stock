@@ -53,4 +53,5 @@ jobs:
       - name: JavaScript syntax checks
         run: |
           for f in *.js; do node --check "$f"; done
-          node tests/dashboard_metrics.test.js
+          for f in tests/*.test.js; do node "$f"; done
+
