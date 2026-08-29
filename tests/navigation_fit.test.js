@@ -13,5 +13,8 @@ assert(source.includes('Voorraad & magazijn'));
 assert(source.includes('Handel & facturen'));
 assert(source.includes('Organisatie & beheer'));
 assert(source.includes('function categorize'));
+assert(source.includes("document.addEventListener('pointerover'"));
+assert(source.includes("else if(clicked?.closest('.nav-item[data-view],a.nav-item'))closeMenus()"));
+assert(source.includes('.trade-sidebar-submenu:not(.open)'));
 console.log('navigation fit checks passed');
 
