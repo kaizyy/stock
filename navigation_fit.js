@@ -72,10 +72,8 @@
     else if(clicked?.closest('[data-view="settings"],#settingsSidebarSubmenu'))closeMenus('settings');
     else if(clicked?.closest('.nav-item[data-view],a.nav-item'))closeMenus();
   }
-  let closeTimer;
   installStyles();window.addEventListener('resize',fit,{passive:true});window.addEventListener('load',fit);
   document.addEventListener('click',event=>{closeOtherMenus(event.target);setTimeout(fit,0)});
-  document.addEventListener('pointerover',event=>{clearTimeout(closeTimer);if(!event.target.closest('#tradeNavGroup,#tradeSidebarSubmenu,[data-view="settings"],#settingsSidebarSubmenu'))closeTimer=setTimeout(()=>{if(!document.querySelector('#tradeNavGroup:hover,#tradeSidebarSubmenu:hover,[data-view="settings"]:hover,#settingsSidebarSubmenu:hover'))closeMenus()},100)},{passive:true});
   new MutationObserver(()=>requestAnimationFrame(fit)).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']});
   fit();
 })();
