@@ -18,5 +18,9 @@ assert(source.includes('function categorize'));
 assert(!source.includes("document.addEventListener('pointerover'"));
 assert(source.includes("else if(clicked?.closest('.nav-item[data-view],a.nav-item'))closeMenus()"));
 assert(source.includes('.trade-sidebar-submenu:not(.open)'));
+assert(source.includes('function toggleSettings'));
+assert(source.includes('settings-nav-caret'));
+assert(source.includes('touch-action:manipulation'));
+assert(source.includes("innerWidth<=900)document.querySelector('.sidebar')?.classList.add('open')"));
 console.log('navigation fit checks passed');
 

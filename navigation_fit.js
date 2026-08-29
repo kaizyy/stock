@@ -15,6 +15,7 @@
       .sidebar .ux-nav-group.active:not(.open){background:rgba(255,255,255,.16)!important;color:#fff!important;box-shadow:inset 4px 0 0 #e7c684}
       .trade-sidebar-submenu .nav-item.active,.settings-sidebar-submenu button.active{background:rgba(231,198,132,.2)!important;color:#fff!important;box-shadow:inset 3px 0 0 #e7c684;font-weight:800!important}
       .sidebar .nav-item,.sidebar .nav-item>span:first-child{transition:background-color .16s ease,color .16s ease,box-shadow .16s ease,transform .16s ease}
+      .sidebar [data-view="settings"]{min-height:40px!important;touch-action:manipulation}.settings-nav-caret{justify-self:end;font-style:normal;font-size:13px!important;transition:transform .16s ease}.sidebar [data-view="settings"][aria-expanded="true"] .settings-nav-caret{transform:rotate(180deg)}
       .sidebar .settings-sidebar-submenu,.sidebar .trade-sidebar-submenu{margin:0 0 2px 27px!important;padding:2px 0 2px 7px!important;gap:0!important}
       .sidebar .settings-sidebar-submenu:not(.open),.sidebar .trade-sidebar-submenu:not(.open){display:none!important}
       .sidebar .settings-sidebar-submenu button,.sidebar .trade-sidebar-submenu .nav-item{min-height:27px!important;padding:5px 7px!important;font-size:11px!important;line-height:1.1}
@@ -55,6 +56,7 @@
       section.hidden=![...host.children].some(item=>!item.hidden);
     });
     const trade=document.getElementById('tradeNavGroup');if(trade){const label=trade.querySelector('span:nth-child(2)');if(label)label.textContent='Orders & transacties'}
+    const settings=nav.querySelector('[data-view="settings"]');if(settings&&!settings.querySelector('.settings-nav-caret'))settings.insertAdjacentHTML('beforeend','<i class="settings-nav-caret" aria-hidden="true">⌄</i>');
   }
   function syncActive(nav=document.querySelector('.sidebar nav')){
     if(!nav)return;
@@ -65,7 +67,11 @@
   }
   function closeMenus(except=''){
     if(except!=='trade'){document.getElementById('tradeSidebarSubmenu')?.classList.remove('open');const group=document.getElementById('tradeNavGroup');group?.classList.remove('open');group?.setAttribute('aria-expanded','false')}
-    if(except!=='settings')document.getElementById('settingsSidebarSubmenu')?.classList.remove('open');
+    if(except!=='settings'){document.getElementById('settingsSidebarSubmenu')?.classList.remove('open');document.querySelector('[data-view="settings"]')?.setAttribute('aria-expanded','false')}
+  }
+  function toggleSettings(button){
+    const menu=document.getElementById('settingsSidebarSubmenu');if(!menu)return;
+    const shouldOpen=!menu.classList.contains('open');setTimeout(()=>{menu.classList.toggle('open',shouldOpen);button.setAttribute('aria-expanded',String(shouldOpen));if(shouldOpen&&innerWidth<=900)document.querySelector('.sidebar')?.classList.add('open')},80);
   }
   function closeOtherMenus(clicked){
     if(clicked?.closest('#tradeNavGroup,#tradeSidebarSubmenu'))closeMenus('trade');
@@ -73,7 +79,7 @@
     else if(clicked?.closest('.nav-item[data-view],a.nav-item'))closeMenus();
   }
   installStyles();window.addEventListener('resize',fit,{passive:true});window.addEventListener('load',fit);
-  document.addEventListener('click',event=>{closeOtherMenus(event.target);setTimeout(fit,0)});
+  document.addEventListener('click',event=>{const settings=event.target.closest('[data-view="settings"]');if(settings)toggleSettings(settings);closeOtherMenus(event.target);setTimeout(fit,0)});
   new MutationObserver(()=>requestAnimationFrame(fit)).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']});
   fit();
 })();
