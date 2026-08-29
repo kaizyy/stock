@@ -10,6 +10,7 @@ import financial_workflow
 import order_management
 import runner
 import server
+import sales_workflow
 
 DB_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -26,6 +27,7 @@ class CoreWorkflowRegressionTests(unittest.TestCase):
         billing.initialize_billing()
         documents_v3.initialize()
         financial_workflow.initialize()
+        sales_workflow.initialize()
 
     def setUp(self):
         self.user_id, self.room_id = uuid.uuid4(), uuid.uuid4()
@@ -88,6 +90,21 @@ class CoreWorkflowRegressionTests(unittest.TestCase):
         matching = [tx for tx in state["transactions"] if tx.get("orderId") == order_id]
         self.assertEqual(len(matching), 1)
         self.assertEqual(state["items"][0]["stock"], 17)
+
+    def test_sales_orders_reserve_stock_and_prevent_double_sale(self):
+        self.create_sales_order(quantity=15)
+        with self.assertRaises(ValueError):self.create_sales_order(quantity=6)
+        with server.db() as conn:
+            reserved=conn.execute("SELECT SUM(quantity)::float8 quantity FROM inventory_reservations WHERE stockroom_id=%s",(self.room_id,)).fetchone()["quantity"]
+        self.assertEqual(reserved,15)
+
+    def test_quote_converts_to_order_invoice_and_reservation(self):
+        q=sales_workflow.create(self.session,{"relation_name":"Offerteklant","lines_json":json.dumps([{"item_id":"item-1","item_name":"Testartikel","sku":"T-1","quantity":4,"unit_price":12}])})
+        result=sales_workflow.convert(self.session,q["id"])
+        self.assertTrue(result["invoice_number"].startswith("INV-"))
+        with server.db() as conn:
+            reservation=conn.execute("SELECT quantity::float8 FROM inventory_reservations WHERE order_id=%s",(result["order_id"],)).fetchone()
+        self.assertEqual(reservation["quantity"],4)
 
 
 if __name__ == "__main__":

@@ -114,6 +114,8 @@ def email_document(session, values):
         smtp.ehlo();smtp.starttls(context=context);smtp.ehlo()
         if server.SMTP_USERNAME:smtp.login(server.SMTP_USERNAME,server.SMTP_PASSWORD)
         smtp.send_message(msg)
+    if kind=='invoice':
+        with server.db() as conn:conn.execute("UPDATE invoice_documents SET sent_at=COALESCE(sent_at,NOW()) WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL",(oid,session['stockroom_id']));conn.commit()
     return {'sent':True,'recipient':recipient}
 
 

@@ -72,6 +72,12 @@ def initialize_order_management():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS inventory_reservations(
+            order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,
+            item_id TEXT NOT NULL,quantity NUMERIC(14,3) NOT NULL CHECK(quantity>0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(order_id,item_id))""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inventory_reservations_room_item ON inventory_reservations(stockroom_id,item_id)")
         conn.commit()
 
 
@@ -213,6 +219,18 @@ def _parse_lines(raw):
     return normalized
 
 
+def _sync_sales_reservations(conn, stockroom_id, order_id, lines, active=True):
+    conn.execute("DELETE FROM inventory_reservations WHERE order_id=%s AND stockroom_id=%s", (order_id, stockroom_id))
+    if not active:return
+    room=conn.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE",(stockroom_id,)).fetchone()
+    state=(room or {}).get("state") or {"items":[]}
+    for item_id,item_name,sku,qty,price in lines:
+        item=_find_state_item(state,item_id);stock=float((item or {}).get("stock") or 0)
+        reserved=conn.execute("SELECT COALESCE(SUM(quantity),0)::float8 quantity FROM inventory_reservations WHERE stockroom_id=%s AND item_id=%s",(stockroom_id,item_id)).fetchone()["quantity"]
+        if not item or stock-float(reserved or 0)<qty:raise ValueError(f"Onvoldoende vrije voorraad voor {item_name}: {max(0,stock-float(reserved or 0)):g} beschikbaar.")
+        conn.execute("INSERT INTO inventory_reservations(order_id,stockroom_id,item_id,quantity) VALUES(%s,%s,%s,%s)",(order_id,stockroom_id,item_id,qty))
+
+
 def create_order(session, values):
     order_type = values.get("order_type")
     if order_type not in ("purchase", "sales"):
@@ -248,6 +266,7 @@ def create_order(session, values):
                 "INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                 (str(uuid.uuid4()), order_id, item_id, item_name, sku, qty, price),
             )
+        if order_type=="sales":_sync_sales_reservations(conn,session["stockroom_id"],order_id,lines,status!="cancelled")
         conn.execute(
             "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
             (session["stockroom_id"], session["user_id"], f"order.{order_type}.created", json.dumps({"id": order_id, "reference": reference, "relation": relation_name, "lines": len(lines)})),
@@ -346,6 +365,8 @@ def update_order(session, values):
                 "INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                 (str(uuid.uuid4()), order_id, item_id, item_name, sku, qty, price),
             )
+
+        if expected_type=="sales" and order["inventory_booked_at"] is None:_sync_sales_reservations(conn,session["stockroom_id"],order_id,lines,order["status"]!="cancelled")
 
         if room is not None:
             updated_order = dict(order)
@@ -492,6 +513,13 @@ def update_order_status(session, expected_type, values):
                 raise ValueError("Order bevat geen orderregels.")
             state = room["state"] or {"items": [], "transactions": []}
             _book_inventory(conn, session, order, lines, state)
+            if expected_type=="sales":conn.execute("DELETE FROM inventory_reservations WHERE order_id=%s",(order_id,))
+
+        if expected_type=="sales" and not already_booked and not should_book:
+            if status=="cancelled":conn.execute("DELETE FROM inventory_reservations WHERE order_id=%s",(order_id,))
+            elif order["status"]=="cancelled":
+                lines=conn.execute("SELECT item_id,item_name,sku,quantity::float8,unit_price::float8 FROM order_lines WHERE order_id=%s",(order_id,)).fetchall()
+                _sync_sales_reservations(conn,session["stockroom_id"],order_id,[(x['item_id'],x['item_name'],x['sku'],x['quantity'],x['unit_price']) for x in lines],True)
 
         conn.execute("UPDATE orders SET status=%s,updated_at=NOW() WHERE id=%s", (status, order_id))
         conn.execute(
