@@ -22,5 +22,5 @@ assert(source.includes('function toggleSettings'));
 assert(source.includes('settings-nav-caret'));
 assert(source.includes('touch-action:manipulation'));
 assert(source.includes("innerWidth<=900)document.querySelector('.sidebar')?.classList.add('open')"));
+assert(!source.includes("active.dataset.view!=='settings')closeMenus()"));
 console.log('navigation fit checks passed');
-

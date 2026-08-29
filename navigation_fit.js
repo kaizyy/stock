@@ -63,7 +63,6 @@
     nav.querySelectorAll('.nav-item[data-view]').forEach(item=>item.classList.contains('active')?item.setAttribute('aria-current','page'):item.removeAttribute('aria-current'));
     const active=nav.querySelector('.nav-item[data-view].active');
     if(active?.closest('#tradeSidebarSubmenu'))document.getElementById('tradeNavGroup')?.classList.add('active');
-    if(active&&!active.closest('#tradeSidebarSubmenu')&&active.dataset.view!=='settings')closeMenus();
   }
   function closeMenus(except=''){
     if(except!=='trade'){document.getElementById('tradeSidebarSubmenu')?.classList.remove('open');const group=document.getElementById('tradeNavGroup');group?.classList.remove('open');group?.setAttribute('aria-expanded','false')}
@@ -83,4 +82,3 @@
   new MutationObserver(()=>requestAnimationFrame(fit)).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']});
   fit();
 })();
-

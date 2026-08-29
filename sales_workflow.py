@@ -7,6 +7,8 @@ _installed=False
 def initialize():
     with server.db() as c:
         c.execute("""CREATE TABLE IF NOT EXISTS quotes(id UUID PRIMARY KEY,stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,quote_number TEXT NOT NULL,relation_id UUID,relation_name TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'draft',reference TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',quote_date DATE NOT NULL DEFAULT CURRENT_DATE,valid_until DATE NOT NULL,created_by UUID REFERENCES users(id) ON DELETE SET NULL,converted_order_id UUID REFERENCES orders(id) ON DELETE SET NULL,sent_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(stockroom_id,quote_number))""")
+        for sql in ("ALTER TABLE quotes ADD COLUMN IF NOT EXISTS invoice_number TEXT","ALTER TABLE quotes ADD COLUMN IF NOT EXISTS invoice_date DATE","ALTER TABLE quotes ADD COLUMN IF NOT EXISTS due_date DATE","ALTER TABLE quotes ADD COLUMN IF NOT EXISTS invoice_vat_percent NUMERIC(6,3) NOT NULL DEFAULT 21","ALTER TABLE quotes ADD COLUMN IF NOT EXISTS invoice_paid_amount NUMERIC(14,2) NOT NULL DEFAULT 0","ALTER TABLE quotes ADD COLUMN IF NOT EXISTS invoice_paid_at TIMESTAMPTZ"):
+            c.execute(sql)
         c.execute("""CREATE TABLE IF NOT EXISTS quote_lines(id UUID PRIMARY KEY,quote_id UUID NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,item_id TEXT NOT NULL,item_name TEXT NOT NULL,sku TEXT NOT NULL DEFAULT '',quantity NUMERIC(14,3) NOT NULL CHECK(quantity>0),unit_price NUMERIC(14,4) NOT NULL CHECK(unit_price>=0))""");c.commit()
         c.execute("CREATE TABLE IF NOT EXISTS quote_sequences(stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,year INTEGER NOT NULL,last_value INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(stockroom_id,year))");c.commit()
 def rows(room):
@@ -30,22 +32,68 @@ def convert(session,qid):
     with server.db() as c:
         q=c.execute("SELECT * FROM quotes WHERE id=%s AND stockroom_id=%s FOR UPDATE",(qid,session['stockroom_id'])).fetchone()
         if not q:raise PermissionError('Offerte niet gevonden.')
-        if q['converted_order_id']:return {'converted':True,'order_id':str(q['converted_order_id'])}
+        if q['converted_order_id']:return {'converted':True,'order_id':str(q['converted_order_id']),'invoice_number':q.get('invoice_number')}
+        if q.get('invoice_number'):return {'invoiced':True,'invoice_number':q['invoice_number']}
         lines=c.execute("SELECT item_id,item_name,sku,quantity::float8 quantity,unit_price::float8 unit_price FROM quote_lines WHERE quote_id=%s",(qid,)).fetchall()
-        oid=order_management.create_order(session,{'order_type':'sales','status':'draft','relation_id':str(q['relation_id'] or ''),'relation_name':q['relation_name'],'reference':q['quote_number'],'notes':q['notes'],'lines_json':json.dumps(lines)});business_tools.assign_order_number(oid,session['stockroom_id'],'sales');inv=documents_v3.ensure_invoice(session['stockroom_id'],oid)
-        c.execute("UPDATE quotes SET status='converted',converted_order_id=%s,updated_at=NOW() WHERE id=%s",(oid,qid));c.commit()
-    return {'converted':True,'order_id':oid,'invoice_number':inv['invoice_number']}
-def pdf(room,qid):
+        room=c.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE",(session['stockroom_id'],)).fetchone();state=(room or {}).get('state') or {'items':[]}
+        for line in lines:
+            item=next((x for x in state.get('items',[]) if str(x.get('id'))==str(line['item_id'])),None);stock=float((item or {}).get('stock') or 0)
+            reserved=c.execute("SELECT COALESCE((SELECT SUM(quantity) FROM inventory_reservations WHERE stockroom_id=%s AND item_id=%s),0)::float8+COALESCE((SELECT SUM(quantity) FROM quote_reservations WHERE stockroom_id=%s AND item_id=%s AND quote_id<>%s),0)::float8 quantity",(session['stockroom_id'],line['item_id'],session['stockroom_id'],line['item_id'],qid)).fetchone()['quantity']
+            if not item or stock-float(reserved or 0)<float(line['quantity']):raise ValueError(f"Onvoldoende vrije voorraad voor {line['item_name']}: {max(0,stock-float(reserved or 0)):g} beschikbaar.")
+            c.execute("INSERT INTO quote_reservations(quote_id,stockroom_id,item_id,quantity) VALUES(%s,%s,%s,%s) ON CONFLICT(quote_id,item_id) DO UPDATE SET quantity=EXCLUDED.quantity",(qid,session['stockroom_id'],line['item_id'],line['quantity']))
+        cfg=c.execute("SELECT payment_term_days,default_vat_percent::float8 FROM billing_accounts WHERE stockroom_id=%s",(session['stockroom_id'],)).fetchone() or {'payment_term_days':14,'default_vat_percent':21};year=date.today().year
+        seq=c.execute("INSERT INTO invoice_sequences(stockroom_id,year,last_value) VALUES(%s,%s,1) ON CONFLICT(stockroom_id,year) DO UPDATE SET last_value=invoice_sequences.last_value+1 RETURNING last_value",(session['stockroom_id'],year)).fetchone();number=f"INV-{year}-{int(seq['last_value']):06d}";today=date.today();due=today+timedelta(days=int(cfg['payment_term_days'] or 0))
+        c.execute("UPDATE quotes SET status='invoiced',invoice_number=%s,invoice_date=%s,due_date=%s,invoice_vat_percent=%s,updated_at=NOW() WHERE id=%s",(number,today,due,float(cfg['default_vat_percent'] or 0),qid));c.commit()
+    return {'invoiced':True,'invoice_number':number}
+
+def quote_invoices(room):
+    with server.db() as c:
+        data=c.execute("""SELECT q.id::text,invoice_number,invoice_date,due_date,invoice_vat_percent::float8 vat_percent,invoice_paid_amount::float8 paid_amount,invoice_paid_at paid_at,sent_at,relation_name,quote_number,COALESCE(SUM(l.quantity*l.unit_price),0)::float8 subtotal FROM quotes q JOIN quote_lines l ON l.quote_id=q.id WHERE q.stockroom_id=%s AND q.invoice_number IS NOT NULL AND q.converted_order_id IS NULL GROUP BY q.id""",(room,)).fetchall()
+    out=[]
+    for r in data:
+        d=dict(r);d['order_id']='quote:'+d.pop('id');d['order_number']=d.pop('quote_number');d['total']=round(float(d.pop('subtotal'))*(1+float(d['vat_percent'])/100),2);d['credited']=0;d['outstanding']=max(0,round(d['total']-float(d['paid_amount'] or 0),2));d['reminder_count']=0;d['source']='quote';d['status']='paid' if d['outstanding']<=0 else 'partial' if d['paid_amount'] else 'overdue' if d['due_date']<date.today() else 'sent' if d['sent_at'] else 'draft';out.append(d)
+    return out
+
+def pay_quote_invoice(session,qid,amount,note=''):
+    amount=float(amount)
+    with server.db() as c:
+        q=c.execute("SELECT * FROM quotes WHERE id=%s AND stockroom_id=%s AND invoice_number IS NOT NULL AND converted_order_id IS NULL FOR UPDATE",(qid,session['stockroom_id'])).fetchone()
+        if not q:raise PermissionError('Factuur niet gevonden.')
+        subtotal=float(c.execute("SELECT COALESCE(SUM(quantity*unit_price),0)::float8 total FROM quote_lines WHERE quote_id=%s",(qid,)).fetchone()['total']);total=round(subtotal*(1+float(q['invoice_vat_percent'])/100),2);open_amount=max(0,total-float(q['invoice_paid_amount'] or 0))
+        if amount<=0:raise ValueError('Bedrag moet groter dan 0 zijn.')
+        if amount>open_amount+0.01:raise ValueError('Betaling is hoger dan het openstaande bedrag.')
+        paid=float(q['invoice_paid_amount'] or 0)+amount
+        c.execute("UPDATE quotes SET invoice_paid_amount=%s,invoice_paid_at=CASE WHEN %s>=%s THEN NOW() ELSE invoice_paid_at END,status=CASE WHEN %s>=%s THEN 'paid' ELSE 'partial' END,updated_at=NOW() WHERE id=%s",(paid,paid,total,paid,total,qid));c.commit()
+    if paid+0.01<total:return {'saved':True,'converted':False}
+    lines=[]
+    with server.db() as c:
+        q=c.execute("SELECT * FROM quotes WHERE id=%s AND stockroom_id=%s FOR UPDATE",(qid,session['stockroom_id'])).fetchone();lines=c.execute("SELECT item_id,item_name,sku,quantity::float8 quantity,unit_price::float8 unit_price FROM quote_lines WHERE quote_id=%s",(qid,)).fetchall();c.execute("DELETE FROM quote_reservations WHERE quote_id=%s",(qid,));c.commit()
+    try:
+        oid=order_management.create_order(session,{'order_type':'sales','status':'draft','relation_id':str(q['relation_id'] or ''),'relation_name':q['relation_name'],'reference':q['quote_number'],'notes':q['notes'],'lines_json':json.dumps(lines)});business_tools.assign_order_number(oid,session['stockroom_id'],'sales')
+        with server.db() as c:
+            c.execute("INSERT INTO invoice_documents(order_id,stockroom_id,invoice_number,invoice_date,due_date,vat_percent,paid_amount,paid_at,sent_at) VALUES(%s,%s,%s,%s,%s,%s,%s,NOW(),%s)",(oid,session['stockroom_id'],q['invoice_number'],q['invoice_date'],q['due_date'],q['invoice_vat_percent'],total,q['sent_at']))
+            c.execute("UPDATE quotes SET status='converted',converted_order_id=%s,updated_at=NOW() WHERE id=%s",(oid,qid));c.commit()
+        return {'saved':True,'converted':True,'order_id':oid}
+    except Exception:
+        with server.db() as c:
+            for l in lines:c.execute("INSERT INTO quote_reservations(quote_id,stockroom_id,item_id,quantity) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",(qid,session['stockroom_id'],l['item_id'],l['quantity']))
+            c.commit()
+        raise
+def pdf(room,qid,invoice=False):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas
     q=next((x for x in rows(room) if str(x['id'])==str(qid)),None)
     if not q:raise PermissionError('Offerte niet gevonden.')
-    b=io.BytesIO();c=canvas.Canvas(b,pagesize=A4);c.setFont('Helvetica-Bold',20);c.drawString(20*mm,280*mm,'OFFERTE');c.setFont('Helvetica',10);y=265*mm
-    for label,val in [('Offertenummer',q['quote_number']),('Klant',q['relation_name'] or '—'),('Geldig tot',str(q['valid_until']))]:c.drawString(20*mm,y,f'{label}: {val}');y-=7*mm
+    if invoice and not q.get('invoice_number'):raise ValueError('Factuur is nog niet aangemaakt.')
+    b=io.BytesIO();c=canvas.Canvas(b,pagesize=A4);c.setFont('Helvetica-Bold',20);c.drawString(20*mm,280*mm,'FACTUUR' if invoice else 'OFFERTE');c.setFont('Helvetica',10);y=265*mm
+    meta=[('Factuurnummer',q['invoice_number']),('Klant',q['relation_name'] or '—'),('Vervaldatum',str(q['due_date']))] if invoice else [('Offertenummer',q['quote_number']),('Klant',q['relation_name'] or '—'),('Geldig tot',str(q['valid_until']))]
+    for label,val in meta:c.drawString(20*mm,y,f'{label}: {val}');y-=7*mm
     total=0;y-=5*mm
     for l in q['lines']:amount=float(l['quantity'])*float(l['unit_price']);total+=amount;c.drawString(20*mm,y,f"{float(l['quantity']):g} × {l['item_name']}");c.drawRightString(190*mm,y,f'€ {amount:.2f}');y-=7*mm
-    c.setFont('Helvetica-Bold',12);c.drawRightString(190*mm,y-5*mm,f'Totaal excl. btw: € {total:.2f}');c.save();return b.getvalue(),f"offerte-{q['quote_number']}.pdf"
+    vat=float(q.get('invoice_vat_percent') or 0) if invoice else 0;grand=total*(1+vat/100);c.setFont('Helvetica-Bold',12);c.drawRightString(190*mm,y-5*mm,f'Totaal excl. btw: € {total:.2f}');
+    if invoice:c.drawRightString(190*mm,y-12*mm,f'Totaal incl. btw: € {grand:.2f}')
+    c.save();return b.getvalue(),f"{'factuur-'+q['invoice_number'] if invoice else 'offerte-'+q['quote_number']}.pdf"
 def mail(session,qid):
     with server.db() as c:q=c.execute("SELECT q.*,c.email FROM quotes q LEFT JOIN customers c ON c.id=q.relation_id WHERE q.id=%s AND q.stockroom_id=%s",(qid,session['stockroom_id'])).fetchone()
     if not q or '@' not in (q.get('email') or ''):raise ValueError('Geen geldig klant-e-mailadres ingesteld.')
@@ -60,11 +108,11 @@ def install():
     _installed=True;initialize();og=server.StockroomHandler.do_GET;op=server.StockroomHandler.do_POST
     def get(self):
         p=urllib.parse.urlparse(self.path)
-        if p.path in ('/api/quotes','/api/quotes/pdf'):
+        if p.path in ('/api/quotes','/api/quotes/pdf','/api/quotes/invoice.pdf'):
             s=self.require_session(api=True)
             if not s:return
             if p.path=='/api/quotes':self.send_json(200,{'quotes':rows(s['stockroom_id'])})
-            else:data,name=pdf(s['stockroom_id'],urllib.parse.parse_qs(p.query).get('id',[''])[0]);self.send_pdf(data,name)
+            else:data,name=pdf(s['stockroom_id'],urllib.parse.parse_qs(p.query).get('id',[''])[0],p.path.endswith('invoice.pdf'));self.send_pdf(data,name)
             return
         return og(self)
     def post(self):
@@ -79,4 +127,3 @@ def install():
             return
         return op(self)
     server.StockroomHandler.do_GET=get;server.StockroomHandler.do_POST=post
-

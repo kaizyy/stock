@@ -98,15 +98,23 @@ class CoreWorkflowRegressionTests(unittest.TestCase):
             reserved=conn.execute("SELECT SUM(quantity)::float8 quantity FROM inventory_reservations WHERE stockroom_id=%s",(self.room_id,)).fetchone()["quantity"]
         self.assertEqual(reserved,15)
 
-    def test_quote_converts_to_order_invoice_and_reservation(self):
+    def test_quote_invoice_reserves_and_paid_invoice_creates_order(self):
         q=sales_workflow.create(self.session,{"relation_name":"Offerteklant","lines_json":json.dumps([{"item_id":"item-1","item_name":"Testartikel","sku":"T-1","quantity":4,"unit_price":12}])})
         result=sales_workflow.convert(self.session,q["id"])
         self.assertTrue(result["invoice_number"].startswith("INV-"))
         with server.db() as conn:
-            reservation=conn.execute("SELECT quantity::float8 FROM inventory_reservations WHERE order_id=%s",(result["order_id"],)).fetchone()
+            reservation=conn.execute("SELECT quantity::float8 FROM quote_reservations WHERE quote_id=%s",(q["id"],)).fetchone()
         self.assertEqual(reservation["quantity"],4)
+        invoice=next(x for x in financial_workflow.list_invoices(str(self.room_id)) if x["order_id"]=="quote:"+q["id"])
+        partial=financial_workflow.record_payment(self.session,invoice["order_id"],5,"deelbetaling")
+        self.assertFalse(partial["converted"])
+        paid=financial_workflow.record_payment(self.session,invoice["order_id"],invoice["total"]-5,"slotbetaling")
+        self.assertTrue(paid["converted"])
+        with server.db() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM quote_reservations WHERE quote_id=%s",(q["id"],)).fetchone())
+            order_reservation=conn.execute("SELECT quantity::float8 FROM inventory_reservations WHERE order_id=%s",(paid["order_id"],)).fetchone()
+        self.assertEqual(order_reservation["quantity"],4)
 
 
 if __name__ == "__main__":
     unittest.main()
-

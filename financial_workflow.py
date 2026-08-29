@@ -51,7 +51,9 @@ def list_invoices(stockroom_id):
         elif d.get('sent_at'):status='sent'
         else:status='draft'
         d.update(outstanding=outstanding,status=status);out.append(d)
-    return out
+    import sales_workflow
+    out.extend(sales_workflow.quote_invoices(stockroom_id))
+    return sorted(out,key=lambda x:(x.get('invoice_date') or date.min,x.get('invoice_number') or ''),reverse=True)
 
 def _invoice_total(conn,stockroom_id,order_id):
     r=conn.execute("SELECT COALESCE(SUM(l.quantity*l.unit_price),0)::float8 subtotal,i.vat_percent::float8 FROM invoice_documents i LEFT JOIN order_lines l ON l.order_id=i.order_id WHERE i.order_id=%s AND i.stockroom_id=%s AND i.deleted_at IS NULL GROUP BY i.vat_percent",(order_id,stockroom_id)).fetchone()
@@ -59,6 +61,9 @@ def _invoice_total(conn,stockroom_id,order_id):
     return round(float(r['subtotal'] or 0)*(1+float(r['vat_percent'] or 0)/100),2)
 
 def record_payment(session,order_id,amount,note=''):
+    if str(order_id or '').startswith('quote:'):
+        import sales_workflow
+        return sales_workflow.pay_quote_invoice(session,str(order_id)[6:],amount,note)
     amount=float(amount)
     if amount<=0:raise ValueError('Bedrag moet groter dan 0 zijn.')
     documents_v3.ensure_invoice(session['stockroom_id'],order_id)
@@ -208,4 +213,3 @@ def install():
             return
         return old_post(self)
     server.StockroomHandler.do_GET=do_GET;server.StockroomHandler.do_POST=do_POST
-

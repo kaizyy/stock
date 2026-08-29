@@ -78,6 +78,11 @@ def initialize_order_management():
             item_id TEXT NOT NULL,quantity NUMERIC(14,3) NOT NULL CHECK(quantity>0),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(order_id,item_id))""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_inventory_reservations_room_item ON inventory_reservations(stockroom_id,item_id)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS quote_reservations(
+            quote_id UUID NOT NULL,stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,
+            item_id TEXT NOT NULL,quantity NUMERIC(14,3) NOT NULL CHECK(quantity>0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(quote_id,item_id))""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_reservations_room_item ON quote_reservations(stockroom_id,item_id)")
         conn.commit()
 
 
@@ -226,7 +231,7 @@ def _sync_sales_reservations(conn, stockroom_id, order_id, lines, active=True):
     state=(room or {}).get("state") or {"items":[]}
     for item_id,item_name,sku,qty,price in lines:
         item=_find_state_item(state,item_id);stock=float((item or {}).get("stock") or 0)
-        reserved=conn.execute("SELECT COALESCE(SUM(quantity),0)::float8 quantity FROM inventory_reservations WHERE stockroom_id=%s AND item_id=%s",(stockroom_id,item_id)).fetchone()["quantity"]
+        reserved=conn.execute("SELECT COALESCE((SELECT SUM(quantity) FROM inventory_reservations WHERE stockroom_id=%s AND item_id=%s),0)::float8+COALESCE((SELECT SUM(quantity) FROM quote_reservations WHERE stockroom_id=%s AND item_id=%s),0)::float8 quantity",(stockroom_id,item_id,stockroom_id,item_id)).fetchone()["quantity"]
         if not item or stock-float(reserved or 0)<qty:raise ValueError(f"Onvoldoende vrije voorraad voor {item_name}: {max(0,stock-float(reserved or 0)):g} beschikbaar.")
         conn.execute("INSERT INTO inventory_reservations(order_id,stockroom_id,item_id,quantity) VALUES(%s,%s,%s,%s)",(order_id,stockroom_id,item_id,qty))
 
@@ -533,4 +538,3 @@ def update_order_status(session, expected_type, values):
         )
         conn.commit()
     return expected_type
-
