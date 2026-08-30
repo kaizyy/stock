@@ -20,6 +20,9 @@ assert(source.includes("else if(clicked?.closest('.nav-item[data-view],a.nav-ite
 const ux=fs.readFileSync('site_ux.js','utf8');
 assert.match(ux,/\['incoming','outgoing','orders','relations','quotes','finance'\]/);
 assert.match(ux,/Orders & transacties/);
+assert(!source.includes("'#tradeSidebarSubmenu','[data-view=\"quotes\"]'"));
+assert(!source.includes("'#tradeSidebarSubmenu','[data-view=\"finance\"]'"));
+assert.match(ux,/if\(e\.target\.closest\('\.nav-item\[data-view\]'\)\)setTimeout\(buildTradeMenu,0\)/);
 assert(source.includes('.trade-sidebar-submenu:not(.open)'));
 assert(source.includes('function toggleSettings'));
 assert(source.includes('settings-nav-caret'));
