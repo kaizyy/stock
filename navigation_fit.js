@@ -77,8 +77,10 @@
     else if(clicked?.closest('[data-view="settings"],#settingsSidebarSubmenu'))closeMenus('settings');
     else if(clicked?.closest('.nav-item[data-view],a.nav-item'))closeMenus();
   }
+  function closeMobileSidebar(){const sidebar=document.querySelector('.sidebar');if(innerWidth<=900&&sidebar?.classList.contains('open')){sidebar.classList.remove('open');document.querySelector('.mobile-menu')?.setAttribute('aria-expanded','false')}}
   installStyles();window.addEventListener('resize',fit,{passive:true});window.addEventListener('load',fit);
-  document.addEventListener('click',event=>{const settings=event.target.closest('[data-view="settings"]');if(settings)toggleSettings(settings);closeOtherMenus(event.target);setTimeout(fit,0)});
+  document.addEventListener('click',event=>{const settings=event.target.closest('[data-view="settings"]');if(settings)toggleSettings(settings);if(innerWidth<=900&&!event.target.closest('.sidebar,.mobile-menu'))closeMobileSidebar();closeOtherMenus(event.target);setTimeout(fit,0)});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMobileSidebar()});
   new MutationObserver(()=>requestAnimationFrame(fit)).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']});
   fit();
 })();
