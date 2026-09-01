@@ -1,0 +1,14 @@
+const fs=require('fs'),assert=require('assert');
+const html=fs.readFileSync('index.html','utf8');
+const css=fs.readFileSync('styles.css','utf8');
+assert.match(html,/class="dashboard-quick-actions"/);
+assert.match(html,/aria-label="Snelle acties"/);
+assert.match(html,/data-add="item"/);
+assert.match(html,/data-add="incoming"/);
+assert.match(html,/data-add="outgoing"/);
+assert.match(html,/class="table-card inventory-table-card" tabindex="0"/);
+assert.match(css,/\.quick-actions-buttons/);
+assert.match(css,/@media\(max-width:1100px\)/);
+assert.match(css,/@media\(max-width:580px\).*\.inventory-metric\{grid-column:1\/-1\}/);
+assert.match(css,/\.inventory-table-card:focus-visible/);
+console.log('PASS dashboard interface checks');
