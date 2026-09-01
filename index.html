@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260828-1" />
+  <link rel="stylesheet" href="styles.css?v=20260901-1" />
 </head>
 <body>
   <div class="app-shell">
@@ -40,6 +40,15 @@
           <article class="metric expected-metric"><div class="metric-icon blue">▣</div><p>Verwacht</p><h2 id="expectedValue">€ 0,00</h2><span id="expectedCount">0 inkomende leveringen</span><div class="metric-detail"><span class="success-text">Betaald, niet geleverd <strong id="expectedPaidValue">€ 0,00</strong></span><span class="danger-text">Niet betaald, niet geleverd <strong id="expectedUnpaidValue">€ 0,00</strong></span></div></article>
         </div>
 
+        <nav class="dashboard-quick-actions" aria-label="Snelle acties">
+          <div class="quick-actions-copy"><span class="quick-actions-icon">＋</span><div><strong>Snelle acties</strong><small>Voeg direct een registratie toe</small></div></div>
+          <div class="quick-actions-buttons">
+            <button type="button" data-add="item"><span>□</span> Nieuw item</button>
+            <button type="button" data-add="incoming"><span>↓</span> Inkoop</button>
+            <button type="button" data-add="outgoing"><span>↑</span> Verkoop</button>
+          </div>
+        </nav>
+
         <div class="dashboard-grid">
           <article class="panel stock-panel"><div class="panel-head"><div><p class="eyebrow">Live overzicht</p><h3>Voorraad</h3></div><button class="text-button" data-go="inventory">Bekijk alles →</button></div><div id="stockList" class="stock-list"></div></article>
           <article class="panel activity-panel"><div class="panel-head"><div><p class="eyebrow">Recente updates</p><h3>Activiteit</h3></div></div><div id="activityList" class="activity-list"></div></article>
@@ -56,7 +65,7 @@
         </div>
       </section>
 
-      <section id="inventory" class="view"><div class="section-head"><div><p class="eyebrow">Actuele aantallen</p><h2>Voorraad</h2></div><div class="section-actions"><button class="button ghost" id="archiveBtn">Archief <span id="archiveCount">0</span></button><button class="button primary" data-add="item">＋ Nieuw item</button></div></div><div class="table-card"><table><thead><tr><th>Item</th><th>SKU</th><th>Voorraad</th><th>Inkoopprijs</th><th>Verkoopprijs</th><th>Waarde</th><th aria-label="Acties"></th></tr></thead><tbody id="inventoryTable"></tbody></table></div></section>
+      <section id="inventory" class="view"><div class="section-head"><div><p class="eyebrow">Actuele aantallen</p><h2>Voorraad</h2></div><div class="section-actions"><button class="button ghost" id="archiveBtn">Archief <span id="archiveCount">0</span></button><button class="button primary" data-add="item">＋ Nieuw item</button></div></div><div class="table-card inventory-table-card" tabindex="0" aria-label="Voorraadtabel, horizontaal scrollbaar op kleine schermen"><table><thead><tr><th>Item</th><th>SKU</th><th>Voorraad</th><th>Inkoopprijs</th><th>Verkoopprijs</th><th>Waarde</th><th aria-label="Acties"></th></tr></thead><tbody id="inventoryTable"></tbody></table></div></section>
       <section id="incoming" class="view"><div class="section-head"><div><p class="eyebrow">Bestellingen bij leveranciers</p><h2>Inkomend</h2></div><button class="button primary" data-add="incoming">＋ Inkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet geleverd</button><button class="filter" data-filter="done">Geleverd</button></div><div id="incomingCards" class="transaction-list"></div></section>
       <section id="outgoing" class="view"><div class="section-head"><div><p class="eyebrow">Verkopen aan klanten</p><h2>Uitgaand</h2></div><button class="button primary" data-add="outgoing">＋ Verkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet betaald</button><button class="filter" data-filter="done">Betaald</button></div><div id="outgoingCards" class="transaction-list"></div></section>
       <footer class="site-footer">© 2026 <a href="https://valerith.nl" target="_blank" rel="noopener noreferrer">Valerith.nl</a></footer>
@@ -88,8 +97,8 @@
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <button id="exportBtn" type="button" hidden aria-hidden="true" tabindex="-1"></button>
-  <script src="dashboard_metrics.js?v=20260828-1"></script>
-  <script src="app.js?v=20260828-1"></script>
+  <script src="dashboard_metrics.js?v=20260901-1"></script>
+  <script src="app.js?v=20260901-1"></script>
   <script>
     (() => {
       const greetingForHour = hour => {
