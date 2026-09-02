@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260901-1" />
+  <link rel="stylesheet" href="styles.css?v=20260902-1" />
 </head>
 <body>
   <div class="app-shell">
@@ -39,15 +39,6 @@
           <article class="metric outstanding-metric"><div class="metric-icon amber">◷</div><p>Openstaand</p><h2 id="outstandingValue">€ 0,00</h2><span id="outstandingCount">0 betalingen te ontvangen</span><div class="metric-detail"><span>Tot 7 dagen <strong id="outstandingRecentValue">€ 0,00</strong></span><span class="danger-text">Ouder dan 7 dagen <strong id="outstandingOverdueValue">€ 0,00</strong></span></div></article>
           <article class="metric expected-metric"><div class="metric-icon blue">▣</div><p>Verwacht</p><h2 id="expectedValue">€ 0,00</h2><span id="expectedCount">0 inkomende leveringen</span><div class="metric-detail"><span class="success-text">Betaald, niet geleverd <strong id="expectedPaidValue">€ 0,00</strong></span><span class="danger-text">Niet betaald, niet geleverd <strong id="expectedUnpaidValue">€ 0,00</strong></span></div></article>
         </div>
-
-        <nav class="dashboard-quick-actions" aria-label="Snelle acties">
-          <div class="quick-actions-copy"><span class="quick-actions-icon">＋</span><div><strong>Snelle acties</strong><small>Voeg direct een registratie toe</small></div></div>
-          <div class="quick-actions-buttons">
-            <button type="button" data-add="item"><span>□</span> Nieuw item</button>
-            <button type="button" data-add="incoming"><span>↓</span> Inkoop</button>
-            <button type="button" data-add="outgoing"><span>↑</span> Verkoop</button>
-          </div>
-        </nav>
 
         <div class="dashboard-grid">
           <article class="panel stock-panel"><div class="panel-head"><div><p class="eyebrow">Live overzicht</p><h3>Voorraad</h3></div><button class="text-button" data-go="inventory">Bekijk alles →</button></div><div id="stockList" class="stock-list"></div></article>
@@ -97,8 +88,8 @@
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <button id="exportBtn" type="button" hidden aria-hidden="true" tabindex="-1"></button>
-  <script src="dashboard_metrics.js?v=20260901-1"></script>
-  <script src="app.js?v=20260901-1"></script>
+  <script src="dashboard_metrics.js?v=20260902-1"></script>
+  <script src="app.js?v=20260902-1"></script>
   <script>
     (() => {
       const greetingForHour = hour => {
