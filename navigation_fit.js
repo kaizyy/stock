@@ -45,7 +45,7 @@
   const categories=[
     ['dashboard','Start & inzicht',['[data-view="overview"]','[data-view="analytics"]']],
     ['stock','Voorraad & magazijn',['[data-view="inventory"]','[data-view="warehouse"]']],
-    ['trade','Handel & facturen',['#tradeNavGroup','#tradeSidebarSubmenu']],
+    ['trade','Handel & facturen',['#tradeNavGroup','#tradeSidebarSubmenu','[data-view="quotes"]','[data-view="finance"]']],
     ['manage','Organisatie & beheer',['a[href="/members"]','[data-view="notifications"]','[data-view="settings"]','#settingsSidebarSubmenu','[data-view="platformAdmin"]']]
   ];
   function categorize(nav=document.querySelector('.sidebar nav')){
