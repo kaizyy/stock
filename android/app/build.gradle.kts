@@ -10,8 +10,8 @@ android {
         applicationId = "nl.valerith.stockroom"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "2.0.0"
 
         val stockroomUrl = (project.findProperty("STOCKROOM_BASE_URL") as String?)
             ?.trim()

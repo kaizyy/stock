@@ -1,0 +1,11 @@
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const activity=fs.readFileSync('android/app/src/main/java/nl/valerith/stockroom/MainActivity.java','utf8');
+const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
+const workflow=fs.readFileSync('.github/workflows/android-apk.yml','utf8');
+for(const capability of ['onShowFileChooser','CATEGORY_OPENABLE','onPermissionRequest','RESOURCE_VIDEO_CAPTURE','onCreateWindow','onReceivedError','onReceivedSslError','CookieManager.getInstance().flush()','restoreState','saveState'])assert.match(activity,new RegExp(capability.replace(/[()]/g,'\\$&')));
+assert.match(activity,/"https"\.equalsIgnoreCase\(scheme\)/);
+assert.match(activity,/host\.equalsIgnoreCase\(appUri\.getHost\(\)\)/);
+assert.match(manifest,/android\.permission\.CAMERA/);
+assert.match(manifest,/usesCleartextTraffic="false"/);
+assert.match(workflow,/python -m unittest discover/);
+assert.match(workflow,/lintDebug assembleDebug/);

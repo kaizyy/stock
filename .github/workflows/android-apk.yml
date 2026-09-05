@@ -2,10 +2,25 @@ name: Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/build-android-trigger'
 
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: stockroom
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: stockroom_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U stockroom -d stockroom_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     permissions:
       contents: read
     steps:
@@ -14,22 +29,23 @@ jobs:
 
       - name: Python syntax and regression checks
         run: |
-          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py
+          python -m pip install "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5"
+          python -m py_compile *.py tools/*.py tests/*.py
           python tools/regression_check.py
+          python -m unittest discover -s tests -v
+        env:
+          TEST_DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_test
 
       - name: JavaScript syntax checks
         run: |
-          node --check app.js
-          node --check settings.js
-          node --check features.js
-          node --check features_optional_fix.js
-          node --check role_dashboard.js
+          for f in *.js; do node --check "$f"; done
+          for f in tests/*.test.js; do node "$f"; done
 
   build-debug-apk:
     needs: preflight
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -40,6 +56,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-37"
+
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -48,7 +70,7 @@ jobs:
       - name: Build debug APK
         env:
           STOCKROOM_BASE_URL: ${{ vars.STOCKROOM_BASE_URL || 'https://stock.valerith.nl' }}
-        run: gradle -p android assembleDebug -PSTOCKROOM_BASE_URL="$STOCKROOM_BASE_URL" --stacktrace
+        run: gradle -p android clean lintDebug assembleDebug -PSTOCKROOM_BASE_URL="$STOCKROOM_BASE_URL" --stacktrace
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -56,11 +78,3 @@ jobs:
           name: stockroom-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-      - name: Publish android-latest release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk stockroom-debug.apk
-          gh release delete android-latest --yes --cleanup-tag || true
-          gh release create android-latest stockroom-debug.apk --title "Stockroom Android latest" --notes "Handmatig gebouwde debug-APK na geslaagde regressiechecks."

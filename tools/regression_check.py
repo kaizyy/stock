@@ -71,16 +71,16 @@ def check_android_shell() -> None:
     activity = read("android/app/src/main/java/nl/valerith/stockroom/MainActivity.java")
     manifest = read("android/app/src/main/AndroidManifest.xml")
     gradle = read("android/app/build.gradle.kts")
-    require(activity, ["setJavaScriptEnabled(true)", "setDomStorageEnabled(true)", "setAcceptCookie(true)", "setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW)", "setAllowFileAccess(false)", "setAllowContentAccess(false)", "handler.cancel()", "BuildConfig.STOCKROOM_BASE_URL", "host.equalsIgnoreCase(appUri.getHost())", "CookieManager.getInstance().flush()", "WebView.startSafeBrowsing"], "Android WebView-beveiliging")
-    require(manifest, ['android.permission.INTERNET', 'android:usesCleartextTraffic="false"', '.MainActivity'], "Android manifest")
-    require(gradle, ['minSdk = 26', 'targetSdk = 36', 'compileSdk = 37', 'versionCode = 2', 'versionName = "1.1.0"', '?: "https://stock.valerith.nl"'], "Android buildconfig")
+    require(activity, ["setJavaScriptEnabled(true)", "setDomStorageEnabled(true)", "setAcceptCookie(true)", "setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW)", "setAllowFileAccess(false)", "setAllowContentAccess(true)", "handler.cancel()", "BuildConfig.STOCKROOM_BASE_URL", "host.equalsIgnoreCase(appUri.getHost())", "CookieManager.getInstance().flush()", "WebView.startSafeBrowsing", "onShowFileChooser", "onPermissionRequest", "RESOURCE_VIDEO_CAPTURE", "onCreateWindow", "onReceivedError", "Opnieuw proberen"], "Android WebView-beveiliging en functiepariteit")
+    require(manifest, ['android.permission.INTERNET', 'android.permission.CAMERA', 'android:usesCleartextTraffic="false"', 'android:hardwareAccelerated="true"', '.MainActivity'], "Android manifest")
+    require(gradle, ['minSdk = 26', 'targetSdk = 36', 'compileSdk = 37', 'versionCode = 3', 'versionName = "2.0.0"', '?: "https://stock.valerith.nl"'], "Android buildconfig")
     kotlin_main = ROOT / "android/app/src/main/java/nl/valerith/stockroom/MainActivity.kt"
     assert not kotlin_main.exists(), "Oude native MainActivity.kt mag niet naast de parity-shell blijven bestaan"
 
 
 def check_build_gate() -> None:
     workflow = read(".github/workflows/android-apk.yml")
-    require(workflow, ["workflow_dispatch:", "preflight:", "needs: preflight", "python tools/regression_check.py", "node --check app.js", "assembleDebug"], "Android build gate")
+    require(workflow, ["workflow_dispatch:", "preflight:", "needs: preflight", "python tools/regression_check.py", 'node --check "$f"', "python -m unittest discover", "lintDebug assembleDebug"], "Android build gate")
     if "\n  push:" in workflow:
         require(workflow, ["paths:", "- '.github/build-android-trigger'"], "Expliciete Android build-trigger")
     assert "\n  pull_request:" not in workflow, "APK-build mag niet automatisch op pull_request starten"
