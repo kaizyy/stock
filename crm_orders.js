@@ -77,7 +77,7 @@
   installUI();
   bindRelationForm('supplierForm','supplier');
   bindRelationForm('customerForm','customer');
+  document.addEventListener('orders:refresh',refresh);
   document.getElementById('orderDialog').addEventListener('cancel',e=>{e.preventDefault();closeOrder()});
   refresh();
 })();
-

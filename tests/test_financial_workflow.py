@@ -13,6 +13,7 @@ class FinancialWorkflowTests(unittest.TestCase):
         self.assertTrue(callable(fw.permanently_delete_invoice))
         self.assertTrue(callable(fw.reservation_overview))
         self.assertTrue(callable(fw.update_invoice))
+        self.assertTrue(callable(fw.release_reservation))
 
     def test_finance_module_starts_uninstalled(self):
         self.assertIn(fw._installed,(False,True))

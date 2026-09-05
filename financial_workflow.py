@@ -59,12 +59,22 @@ def list_invoices(stockroom_id):
 def reservation_overview(stockroom_id):
     with server.db() as conn:
         room=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(stockroom_id,)).fetchone();state=(room or {}).get('state') or {'items':[]}
-        order_rows=conn.execute("SELECT r.item_id,r.quantity::float8,o.order_number,o.reference FROM inventory_reservations r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s ORDER BY o.created_at",(stockroom_id,)).fetchall()
-        quote_rows=conn.execute("SELECT r.item_id,r.quantity::float8,q.quote_number FROM quote_reservations r JOIN quotes q ON q.id=r.quote_id WHERE r.stockroom_id=%s ORDER BY q.created_at",(stockroom_id,)).fetchall()
+        order_rows=conn.execute("SELECT r.item_id,r.quantity::float8,r.order_id::text reservation_id,o.order_number,o.reference FROM inventory_reservations r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s ORDER BY o.created_at",(stockroom_id,)).fetchall()
+        quote_rows=conn.execute("SELECT r.item_id,r.quantity::float8,r.quote_id::text reservation_id,q.quote_number FROM quote_reservations r JOIN quotes q ON q.id=r.quote_id WHERE r.stockroom_id=%s ORDER BY q.created_at",(stockroom_id,)).fetchall()
     sources={}
-    for row in order_rows:sources.setdefault(row['item_id'],[]).append({'type':'order','label':row['order_number'] or row['reference'] or 'Verkooporder','quantity':row['quantity']})
-    for row in quote_rows:sources.setdefault(row['item_id'],[]).append({'type':'invoice','label':row['quote_number'],'quantity':row['quantity']})
+    for row in order_rows:sources.setdefault(row['item_id'],[]).append({'type':'order','id':row['reservation_id'],'label':row['order_number'] or row['reference'] or 'Verkooporder','quantity':row['quantity']})
+    for row in quote_rows:sources.setdefault(row['item_id'],[]).append({'type':'invoice','id':row['reservation_id'],'label':row['quote_number'],'quantity':row['quantity']})
     return [{'item_id':str(item.get('id')),'stock':float(item.get('stock') or 0),'reserved':sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[])),'available':max(0,float(item.get('stock') or 0)-sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[]))),'sources':sources.get(str(item.get('id')),[])} for item in state.get('items',[]) if not item.get('archived')]
+
+def release_reservation(session,values):
+    kind=(values.get('type') or '').strip();reservation_id=(values.get('id') or '').strip();item_id=(values.get('item_id') or '').strip()
+    if kind not in ('order','invoice') or not reservation_id or not item_id:raise ValueError('Reservering is ongeldig.')
+    table,key=('inventory_reservations','order_id') if kind=='order' else ('quote_reservations','quote_id')
+    with server.db() as conn:
+        deleted=conn.execute(f"DELETE FROM {table} WHERE {key}=%s AND item_id=%s AND stockroom_id=%s RETURNING quantity::float8",(reservation_id,item_id,session['stockroom_id'])).fetchone()
+        if not deleted:raise PermissionError('Reservering niet gevonden of al vrijgegeven.')
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'reservation.released',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'type':kind,'id':reservation_id,'item_id':item_id,'quantity':deleted['quantity']})));conn.commit()
+    return {'released':True,'quantity':deleted['quantity']}
 
 def update_invoice(session,values):
     order_id=(values.get('order_id') or '').strip();inv_date=(values.get('invoice_date') or '').strip();due=(values.get('due_date') or '').strip();vat=float(values.get('vat_percent') or 0)
@@ -242,14 +252,14 @@ def install():
         return old_get(self)
     def do_POST(self):
         path=urllib.parse.urlparse(self.path).path
-        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete','/api/finance/restore','/api/finance/delete-permanently','/api/finance/update'):
+        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete','/api/finance/restore','/api/finance/delete-permanently','/api/finance/update','/api/finance/reservations/release'):
             if not self.enforce_origin():return
             s=self.require_session(api=True)
             if not s:return
             if s.get('role') not in ('owner','admin','member','seller'):self.send_json(403,{'error':'Geen rechten.'});return
             f=self.form_data() or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
             try:
-                res=update_invoice(s,v) if path.endswith('/update') else record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else permanently_delete_invoice(s,v.get('order_id')) if path.endswith('/delete-permanently') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else restore_invoice(s,v.get('order_id')) if path.endswith('/restore') else send_reminder(s,v.get('order_id'))
+                res=release_reservation(s,v) if path.endswith('/reservations/release') else update_invoice(s,v) if path.endswith('/update') else record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else permanently_delete_invoice(s,v.get('order_id')) if path.endswith('/delete-permanently') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else restore_invoice(s,v.get('order_id')) if path.endswith('/restore') else send_reminder(s,v.get('order_id'))
                 self.send_json(200,res)
             except PermissionError as e:self.send_json(403,{'error':str(e)})
             except ValueError as e:self.send_json(400,{'error':str(e)})

@@ -8,3 +8,5 @@ assert.match(ui,/data-invoice-mail/);
 assert.match(ui,/E-mailadres ontvanger/);
 assert.match(docker,/workflow_visibility_ui\.js/);
 assert.match(ui,/ensureFinanceModule\(\);install\(\)/);
+assert.match(ui,/api\/finance\/reservations\/release/);
+assert.match(ui,/orders:refresh/);
