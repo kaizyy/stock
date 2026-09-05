@@ -13,3 +13,7 @@ assert.match(ui,/orders:refresh/);
 assert.match(ui,/Actieve reserveringen/);
 assert.match(ui,/data-release-reservation/);
 assert.match(ui,/Nogmaals: definitief vrijgeven/);
+assert.match(ui,/Dashboardmeldingen/);
+assert.match(ui,/Verlopen facturen/);
+assert.match(ui,/Lage vrije voorraad/);
+assert.match(ui,/available.*<8/);

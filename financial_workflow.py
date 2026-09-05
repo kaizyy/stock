@@ -64,7 +64,7 @@ def reservation_overview(stockroom_id):
     sources={}
     for row in order_rows:sources.setdefault(row['item_id'],[]).append({'type':'order','id':row['reservation_id'],'label':row['order_number'] or row['reference'] or 'Verkooporder','quantity':row['quantity']})
     for row in quote_rows:sources.setdefault(row['item_id'],[]).append({'type':'invoice','id':row['reservation_id'],'label':row['quote_number'],'quantity':row['quantity']})
-    return [{'item_id':str(item.get('id')),'stock':float(item.get('stock') or 0),'reserved':sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[])),'available':max(0,float(item.get('stock') or 0)-sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[]))),'sources':sources.get(str(item.get('id')),[])} for item in state.get('items',[]) if not item.get('archived')]
+    return [{'item_id':str(item.get('id')),'item_name':item.get('name') or item.get('sku') or 'Artikel','sku':item.get('sku') or '','stock':float(item.get('stock') or 0),'reserved':sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[])),'available':max(0,float(item.get('stock') or 0)-sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[]))),'sources':sources.get(str(item.get('id')),[])} for item in state.get('items',[]) if not item.get('archived')]
 
 def release_reservation(session,values):
     kind=(values.get('type') or '').strip();reservation_id=(values.get('id') or '').strip();item_id=(values.get('item_id') or '').strip()
