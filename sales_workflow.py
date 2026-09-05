@@ -13,7 +13,11 @@ def initialize():
         c.execute("CREATE TABLE IF NOT EXISTS quote_sequences(stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,year INTEGER NOT NULL,last_value INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(stockroom_id,year))");c.commit()
 def rows(room):
     with server.db() as c:
-        out=c.execute("SELECT q.*,q.id::text,converted_order_id::text FROM quotes q WHERE stockroom_id=%s ORDER BY created_at DESC",(room,)).fetchall()
+        out=c.execute("""SELECT q.id::text id,q.stockroom_id::text stockroom_id,q.quote_number,q.relation_id::text relation_id,
+          q.relation_name,q.status,q.reference,q.notes,q.quote_date,q.valid_until,q.created_by::text created_by,
+          q.converted_order_id::text converted_order_id,q.sent_at,q.created_at,q.updated_at,q.invoice_number,
+          q.invoice_date,q.due_date,q.invoice_vat_percent::float8,q.invoice_paid_amount::float8,q.invoice_paid_at
+          FROM quotes q WHERE q.stockroom_id=%s ORDER BY q.created_at DESC""",(room,)).fetchall()
         for q in out:q['lines']=c.execute("SELECT item_id,item_name,sku,quantity::float8,unit_price::float8 FROM quote_lines WHERE quote_id=%s",(q['id'],)).fetchall();q['status']='expired' if q['status'] in ('draft','sent') and q['valid_until']<date.today() else q['status']
     return out
 def create(session,v):
