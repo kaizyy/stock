@@ -46,11 +46,11 @@ Daarnaast ondersteunt de Android-container nu alle mobiele randfuncties die de w
 
 ## Build
 
-- compileSdk 37
+- compileSdk 36
 - targetSdk 36
 - minSdk 26
 - Android 2.0.0 (versionCode 3)
-- AGP 9.3.0 / Gradle 9.5.0 / JDK 17
+- AGP 8.13.2 / Gradle 8.13 / JDK 17
 
 De basis-URL komt uit `STOCKROOM_BASE_URL` en valt terug op:
 
