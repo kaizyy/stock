@@ -6,6 +6,8 @@ for(const capability of ['onShowFileChooser','CATEGORY_OPENABLE','onPermissionRe
 assert.match(activity,/"https"\.equalsIgnoreCase\(scheme\)/);
 assert.match(activity,/host\.equalsIgnoreCase\(appUri\.getHost\(\)\)/);
 assert.match(manifest,/android\.permission\.CAMERA/);
+assert.match(manifest,/android\.hardware\.camera\.any/);
+assert.match(manifest,/android:required="false"/);
 assert.match(manifest,/usesCleartextTraffic="false"/);
 assert.match(workflow,/python -m unittest discover/);
 assert.match(workflow,/lintDebug assembleDebug/);

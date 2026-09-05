@@ -72,7 +72,7 @@ def check_android_shell() -> None:
     manifest = read("android/app/src/main/AndroidManifest.xml")
     gradle = read("android/app/build.gradle.kts")
     require(activity, ["setJavaScriptEnabled(true)", "setDomStorageEnabled(true)", "setAcceptCookie(true)", "setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW)", "setAllowFileAccess(false)", "setAllowContentAccess(true)", "handler.cancel()", "BuildConfig.STOCKROOM_BASE_URL", "host.equalsIgnoreCase(appUri.getHost())", "CookieManager.getInstance().flush()", "WebView.startSafeBrowsing", "onShowFileChooser", "onPermissionRequest", "RESOURCE_VIDEO_CAPTURE", "onCreateWindow", "onReceivedError", "Opnieuw proberen"], "Android WebView-beveiliging en functiepariteit")
-    require(manifest, ['android.permission.INTERNET', 'android.permission.CAMERA', 'android:usesCleartextTraffic="false"', 'android:hardwareAccelerated="true"', '.MainActivity'], "Android manifest")
+    require(manifest, ['android.permission.INTERNET', 'android.permission.CAMERA', 'android.hardware.camera.any', 'android:required="false"', 'android:usesCleartextTraffic="false"', 'android:hardwareAccelerated="true"', '.MainActivity'], "Android manifest")
     require(gradle, ['minSdk = 26', 'targetSdk = 36', 'compileSdk = 36', 'versionCode = 3', 'versionName = "2.0.0"', '?: "https://stock.valerith.nl"'], "Android buildconfig")
     kotlin_main = ROOT / "android/app/src/main/java/nl/valerith/stockroom/MainActivity.kt"
     assert not kotlin_main.exists(), "Oude native MainActivity.kt mag niet naast de parity-shell blijven bestaan"
