@@ -10,3 +10,6 @@ assert.match(docker,/workflow_visibility_ui\.js/);
 assert.match(ui,/ensureFinanceModule\(\);install\(\)/);
 assert.match(ui,/api\/finance\/reservations\/release/);
 assert.match(ui,/orders:refresh/);
+assert.match(ui,/Actieve reserveringen/);
+assert.match(ui,/data-release-reservation/);
+assert.match(ui,/Nogmaals: definitief vrijgeven/);
