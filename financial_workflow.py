@@ -30,11 +30,12 @@ def list_invoices(stockroom_id):
         )
         SELECT i.order_id::text,i.invoice_number,i.invoice_date,i.due_date,i.vat_percent::float8,i.sent_at,
                i.paid_amount::float8,i.paid_at,i.last_reminder_at,i.reminder_count,
-               o.order_number,o.relation_name,
+               o.order_number,o.relation_name,COALESCE(cu.email,'') relation_email,
                ROUND((COALESCE(lt.subtotal,0)*(1+i.vat_percent/100))::numeric,2)::float8 total,
                COALESCE(c.credited,0)::float8 credited
         FROM invoice_documents i
         JOIN orders o ON o.id=i.order_id
+        LEFT JOIN customers cu ON cu.id=o.relation_id AND cu.stockroom_id=o.stockroom_id
         LEFT JOIN line_totals lt ON lt.order_id=i.order_id
         LEFT JOIN credits c ON c.order_id=i.order_id
         WHERE i.stockroom_id=%s AND i.deleted_at IS NULL
@@ -54,6 +55,31 @@ def list_invoices(stockroom_id):
     import sales_workflow
     out.extend(sales_workflow.quote_invoices(stockroom_id))
     return sorted(out,key=lambda x:(x.get('invoice_date') or date.min,x.get('invoice_number') or ''),reverse=True)
+
+def reservation_overview(stockroom_id):
+    with server.db() as conn:
+        room=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(stockroom_id,)).fetchone();state=(room or {}).get('state') or {'items':[]}
+        order_rows=conn.execute("SELECT r.item_id,r.quantity::float8,o.order_number,o.reference FROM inventory_reservations r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s ORDER BY o.created_at",(stockroom_id,)).fetchall()
+        quote_rows=conn.execute("SELECT r.item_id,r.quantity::float8,q.quote_number FROM quote_reservations r JOIN quotes q ON q.id=r.quote_id WHERE r.stockroom_id=%s ORDER BY q.created_at",(stockroom_id,)).fetchall()
+    sources={}
+    for row in order_rows:sources.setdefault(row['item_id'],[]).append({'type':'order','label':row['order_number'] or row['reference'] or 'Verkooporder','quantity':row['quantity']})
+    for row in quote_rows:sources.setdefault(row['item_id'],[]).append({'type':'invoice','label':row['quote_number'],'quantity':row['quantity']})
+    return [{'item_id':str(item.get('id')),'stock':float(item.get('stock') or 0),'reserved':sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[])),'available':max(0,float(item.get('stock') or 0)-sum(float(x['quantity']) for x in sources.get(str(item.get('id')),[]))),'sources':sources.get(str(item.get('id')),[])} for item in state.get('items',[]) if not item.get('archived')]
+
+def update_invoice(session,values):
+    order_id=(values.get('order_id') or '').strip();inv_date=(values.get('invoice_date') or '').strip();due=(values.get('due_date') or '').strip();vat=float(values.get('vat_percent') or 0)
+    if not order_id or not inv_date or not due or vat<0 or vat>100:raise ValueError('Controleer de factuurgegevens.')
+    if due<inv_date:raise ValueError('De vervaldatum mag niet vóór de factuurdatum liggen.')
+    with server.db() as conn:
+        if order_id.startswith('quote:'):
+            qid=order_id[6:];row=conn.execute("UPDATE quotes SET invoice_date=%s::date,due_date=%s::date,invoice_vat_percent=%s,updated_at=NOW() WHERE id=%s AND stockroom_id=%s AND invoice_number IS NOT NULL AND converted_order_id IS NULL AND invoice_paid_amount=0 RETURNING invoice_number",(inv_date,due,vat,qid,session['stockroom_id'])).fetchone()
+        else:
+            credited=conn.execute("SELECT COALESCE(SUM(amount),0)::float8 amount FROM credit_notes WHERE order_id=%s AND stockroom_id=%s",(order_id,session['stockroom_id'])).fetchone()['amount']
+            if credited:raise ValueError('Een gecrediteerde factuur kan niet worden bewerkt.')
+            row=conn.execute("UPDATE invoice_documents SET invoice_date=%s::date,due_date=%s::date,vat_percent=%s WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL AND paid_amount=0 RETURNING invoice_number",(inv_date,due,vat,order_id,session['stockroom_id'])).fetchone()
+        if not row:raise ValueError('Alleen onbetaalde facturen kunnen worden bewerkt.')
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'invoice.updated',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'order_id':order_id,'invoice_number':row['invoice_number']})));conn.commit()
+    return {'updated':True,'invoice_number':row['invoice_number']}
 
 def _invoice_total(conn,stockroom_id,order_id):
     r=conn.execute("SELECT COALESCE(SUM(l.quantity*l.unit_price),0)::float8 subtotal,i.vat_percent::float8 FROM invoice_documents i LEFT JOIN order_lines l ON l.order_id=i.order_id WHERE i.order_id=%s AND i.stockroom_id=%s AND i.deleted_at IS NULL GROUP BY i.vat_percent",(order_id,stockroom_id)).fetchone()
@@ -199,6 +225,10 @@ def install():
             s=self.require_session(api=True)
             if s:self.send_json(200,{'invoices':list_invoices(s['stockroom_id'])})
             return
+        if p.path=='/api/finance/reservations':
+            s=self.require_session(api=True)
+            if s:self.send_json(200,{'items':reservation_overview(s['stockroom_id'])})
+            return
         if p.path=='/api/finance/trash':
             s=self.require_session(api=True)
             if s:self.send_json(200,{'invoices':list_deleted_invoices(s['stockroom_id'])})
@@ -212,14 +242,14 @@ def install():
         return old_get(self)
     def do_POST(self):
         path=urllib.parse.urlparse(self.path).path
-        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete','/api/finance/restore','/api/finance/delete-permanently'):
+        if path in ('/api/finance/payment','/api/finance/credit','/api/finance/reminder','/api/finance/delete','/api/finance/restore','/api/finance/delete-permanently','/api/finance/update'):
             if not self.enforce_origin():return
             s=self.require_session(api=True)
             if not s:return
             if s.get('role') not in ('owner','admin','member','seller'):self.send_json(403,{'error':'Geen rechten.'});return
             f=self.form_data() or {};v={k:(x[0] if isinstance(x,list) and x else x) for k,x in f.items()}
             try:
-                res=record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else permanently_delete_invoice(s,v.get('order_id')) if path.endswith('/delete-permanently') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else restore_invoice(s,v.get('order_id')) if path.endswith('/restore') else send_reminder(s,v.get('order_id'))
+                res=update_invoice(s,v) if path.endswith('/update') else record_payment(s,v.get('order_id'),v.get('amount'),v.get('note') or '') if path.endswith('/payment') else create_credit(s,v.get('order_id'),v.get('amount'),v.get('reason') or '') if path.endswith('/credit') else permanently_delete_invoice(s,v.get('order_id')) if path.endswith('/delete-permanently') else delete_invoice(s,v.get('order_id')) if path.endswith('/delete') else restore_invoice(s,v.get('order_id')) if path.endswith('/restore') else send_reminder(s,v.get('order_id'))
                 self.send_json(200,res)
             except PermissionError as e:self.send_json(403,{'error':str(e)})
             except ValueError as e:self.send_json(400,{'error':str(e)})

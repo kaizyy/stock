@@ -95,6 +95,9 @@ def ensure_invoice(stockroom_id, order_id):
 def email_document(session, values):
     import documents_v2
     oid=(values.get('order_id') or '').strip();kind=(values.get('kind') or 'invoice').strip()
+    if kind=='invoice' and oid.startswith('quote:'):
+        import sales_workflow
+        return sales_workflow.mail_invoice(session,oid[6:],values.get('recipient') or '',values.get('message') or '')
     with server.db() as conn:
         order=conn.execute("SELECT order_type,relation_id,relation_name,order_number FROM orders WHERE id=%s AND stockroom_id=%s",(oid,session['stockroom_id'])).fetchone()
         if not order:raise PermissionError('Order niet gevonden.')
@@ -151,4 +154,3 @@ def install():
             return
         return old_post(self)
     server.StockroomHandler.do_GET=do_GET;server.StockroomHandler.do_POST=do_POST
-

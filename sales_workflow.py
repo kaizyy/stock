@@ -57,7 +57,7 @@ def convert(session,qid):
 
 def quote_invoices(room):
     with server.db() as c:
-        data=c.execute("""SELECT q.id::text,invoice_number,invoice_date,due_date,invoice_vat_percent::float8 vat_percent,invoice_paid_amount::float8 paid_amount,invoice_paid_at paid_at,sent_at,relation_name,quote_number,COALESCE(SUM(l.quantity*l.unit_price),0)::float8 subtotal FROM quotes q JOIN quote_lines l ON l.quote_id=q.id WHERE q.stockroom_id=%s AND q.invoice_number IS NOT NULL AND q.converted_order_id IS NULL GROUP BY q.id""",(room,)).fetchall()
+        data=c.execute("""SELECT q.id::text,invoice_number,invoice_date,due_date,invoice_vat_percent::float8 vat_percent,invoice_paid_amount::float8 paid_amount,invoice_paid_at paid_at,sent_at,q.relation_name,quote_number,COALESCE(cu.email,'') relation_email,COALESCE(SUM(l.quantity*l.unit_price),0)::float8 subtotal FROM quotes q JOIN quote_lines l ON l.quote_id=q.id LEFT JOIN customers cu ON cu.id=q.relation_id AND cu.stockroom_id=q.stockroom_id WHERE q.stockroom_id=%s AND q.invoice_number IS NOT NULL AND q.converted_order_id IS NULL GROUP BY q.id,cu.email""",(room,)).fetchall()
     out=[]
     for r in data:
         d=dict(r);d['order_id']='quote:'+d.pop('id');d['order_number']=d.pop('quote_number');d['total']=round(float(d.pop('subtotal'))*(1+float(d['vat_percent'])/100),2);d['credited']=0;d['outstanding']=max(0,round(d['total']-float(d['paid_amount'] or 0),2));d['reminder_count']=0;d['source']='quote';d['status']='paid' if d['outstanding']<=0 else 'partial' if d['paid_amount'] else 'overdue' if d['due_date']<date.today() else 'sent' if d['sent_at'] else 'draft';out.append(d)
@@ -111,6 +111,16 @@ def mail(session,qid):
     with smtplib.SMTP(server.SMTP_HOST,server.SMTP_PORT,timeout=20) as s:s.ehlo();s.starttls(context=ssl.create_default_context());s.ehlo();s.login(server.SMTP_USERNAME,server.SMTP_PASSWORD) if server.SMTP_USERNAME else None;s.send_message(m)
     with server.db() as c:c.execute("UPDATE quotes SET status='sent',sent_at=NOW(),updated_at=NOW() WHERE id=%s",(qid,));c.commit()
     return {'sent':True}
+def mail_invoice(session,qid,recipient='',message=''):
+    with server.db() as c:q=c.execute("SELECT q.*,cu.email FROM quotes q LEFT JOIN customers cu ON cu.id=q.relation_id AND cu.stockroom_id=q.stockroom_id WHERE q.id=%s AND q.stockroom_id=%s AND q.invoice_number IS NOT NULL",(qid,session['stockroom_id'])).fetchone()
+    if not q:raise PermissionError('Factuur niet gevonden.')
+    recipient=(recipient or q.get('email') or '').strip()
+    if '@' not in recipient:raise ValueError('Geen geldig klant-e-mailadres ingesteld.')
+    data,name=pdf(session['stockroom_id'],qid,True);m=EmailMessage();m['From']=server.SMTP_FROM;m['To']=recipient;m['Subject']=f"Factuur {q['invoice_number']}";m.set_content((message or 'In de bijlage vindt u onze factuur.').strip());m.add_attachment(data,maintype='application',subtype='pdf',filename=name)
+    if not server.SMTP_HOST:raise ValueError('SMTP is niet geconfigureerd.')
+    with smtplib.SMTP(server.SMTP_HOST,server.SMTP_PORT,timeout=20) as s:s.ehlo();s.starttls(context=ssl.create_default_context());s.ehlo();s.login(server.SMTP_USERNAME,server.SMTP_PASSWORD) if server.SMTP_USERNAME else None;s.send_message(m)
+    with server.db() as c:c.execute("UPDATE quotes SET sent_at=COALESCE(sent_at,NOW()),updated_at=NOW() WHERE id=%s",(qid,));c.commit()
+    return {'sent':True,'recipient':recipient}
 def install():
     global _installed
     if _installed:return

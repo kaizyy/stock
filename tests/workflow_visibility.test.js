@@ -1,0 +1,9 @@
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const ui=fs.readFileSync('workflow_visibility_ui.js','utf8'),docker=fs.readFileSync('Dockerfile','utf8');
+assert.match(ui,/api\/finance\/reservations/);
+assert.match(ui,/fysiek.*gereserveerd/);
+assert.match(ui,/Bekijk reserveringen/);
+assert.match(ui,/api\/finance\/update/);
+assert.match(ui,/data-invoice-mail/);
+assert.match(ui,/E-mailadres ontvanger/);
+assert.match(docker,/workflow_visibility_ui\.js/);
