@@ -14,7 +14,8 @@
 
     const deltaInput = row.querySelector('[data-field="delta"]');
     const reasonInput = row.querySelector('[data-field="reason"]');
-    const delta = deltaInput?.value ?? '';
+    const delta = (deltaInput?.value ?? '').replace(',', '.');
+    const numericDelta = Number(delta);
     const reason = reasonInput?.value.trim() || 'Handmatige correctie';
     const message = document.getElementById('featureMessage');
 
@@ -24,8 +25,8 @@
       message.className = `feature-message show ${type}`;
     };
 
-    if (!delta || Number(delta) === 0 || !Number.isFinite(Number(delta))) {
-      show('Vul alleen een geldige voorraadcorrectie in, bijvoorbeeld +5 of -2.', 'error');
+    if (!delta || numericDelta === 0 || !Number.isFinite(numericDelta) || Math.abs(numericDelta * 10 - Math.round(numericDelta * 10)) > 1e-9) {
+      show('Vul een voorraadcorrectie per 0,1 in, bijvoorbeeld +0,1 of -0,1.', 'error');
       return;
     }
 
@@ -45,3 +46,4 @@
     }
   }, true);
 })();
+

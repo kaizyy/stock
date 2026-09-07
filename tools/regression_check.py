@@ -62,11 +62,11 @@ def check_web_feature_parity() -> None:
     require(metrics, ["expectedPaidTotal", "expectedUnpaidTotal", "overdueTotal", "recentTotal", "isLowStock", "stockAfterTransactionRemoval"], "Overzichtsberekeningen en voorraadherberekening")
     require(forecast, ["historyDays", "horizonDays", "leadDays", "reservedByItem", "recommended", "daysCover", "urgency"], "Voorraadprognose en besteladvies")
     require(settings, ["settingsButton.dataset.view = 'settings'", 'Gebruikers & rollen', 'Mijn account', 'Account permanent verwijderen', '/api/members', '/members/add', '/members/role', '/members/remove', '/account/delete', 'body[data-stockroom-role="viewer"]', 'body[data-stockroom-role="buyer"]', 'body[data-stockroom-role="seller"]'], "Instellingen")
-    require(features, ['Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog', 'Auditlog wissen', '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit', '/api/audit/clear', '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad'], "Beheerfuncties")
-    require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "if (!delta || Number(delta) === 0 || !Number.isFinite(Number(delta)))"], "Optionele voorraadcorrectievelden")
+    require(features, ['Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog', 'Auditlog wissen', '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit', '/api/audit/clear', '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad', 'step="0.1"'], "Beheerfuncties")
+    require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "numericDelta * 10", "+0,1 of -0,1"], "Optionele voorraadcorrectievelden")
     require(role_dashboard, ["buyer", "seller", "viewer", "dashboardRole"], "Rolbewust dashboard")
     require(app, ["transactionDate", "storedTransactionDate", "data-edit-transaction", "data-delete-transaction", "Uitgaande bestelling bijgewerkt."], "Handmatige transactiedatum en transacties bewerken/verwijderen")
-    require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations'], "Backend beheer-API")
+    require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations', 'parse_stock_delta', 'decimal_json_number'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
     require(dockerfile, ["inventory_forecast.js", "/app/public/"], "Productie-assets voorraadprognose")
 
@@ -100,3 +100,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

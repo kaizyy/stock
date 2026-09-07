@@ -3,6 +3,7 @@ import json
 import secrets
 import time
 import uuid
+from decimal import Decimal, InvalidOperation
 from functools import partial
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -16,6 +17,20 @@ ROLE_OPTIONS = [
     {"value": "seller", "label": "Verkoper — alleen uitgaand"},
     {"value": "viewer", "label": "Viewer — alleen lezen"},
 ]
+
+
+def parse_stock_delta(value):
+    try:
+        delta = Decimal(str(value).strip().replace(",", "."))
+    except (InvalidOperation, ValueError):
+        raise ValueError("Correctie moet een veelvoud van 0,1 zijn.")
+    if not delta.is_finite() or delta == 0 or delta * 10 != (delta * 10).to_integral_value():
+        raise ValueError("Correctie moet een veelvoud van 0,1 zijn.")
+    return delta
+
+
+def decimal_json_number(value):
+    return int(value) if value == value.to_integral_value() else float(value)
 
 
 def initialize_enhancements():
@@ -528,11 +543,11 @@ class DashboardHandler(runner.StockroomHandler):
             item_id = form.get("item_id", [""])[0] if form else ""
             reason = form.get("reason", [""])[0].strip() if form else ""
             try:
-                delta = int(form.get("delta", ["0"])[0])
-            except ValueError:
-                self.send_json(400, {"error": "Correctie moet een geheel getal zijn."})
+                delta_decimal = parse_stock_delta(form.get("delta", ["0"])[0])
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
                 return
-            if delta == 0 or not reason:
+            if not reason:
                 self.send_json(400, {"error": "Geef een correctie en reden op."})
                 return
             with server.db() as conn:
@@ -543,11 +558,14 @@ class DashboardHandler(runner.StockroomHandler):
                 if not target:
                     self.send_json(404, {"error": "Artikel niet gevonden."})
                     return
-                old_stock = int(target.get("stock", 0))
-                new_stock = old_stock + delta
-                if new_stock < 0:
+                old_stock_decimal = Decimal(str(target.get("stock", 0)))
+                new_stock_decimal = old_stock_decimal + delta_decimal
+                if new_stock_decimal < 0:
                     self.send_json(400, {"error": "Voorraad kan niet negatief worden."})
                     return
+                old_stock = decimal_json_number(old_stock_decimal)
+                new_stock = decimal_json_number(new_stock_decimal)
+                delta = decimal_json_number(delta_decimal)
                 target["stock"] = new_stock
                 state.setdefault("transactions", []).append({"id": str(uuid.uuid4()), "type": "adjustment", "itemId": item_id, "qty": delta, "reason": reason, "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
                 conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
@@ -613,3 +631,4 @@ if __name__ == "__main__":
     httpd = ThreadingHTTPServer((server.HOST, server.PORT), handler)
     print("Stockroom draait op poort 8000 met rollen, uitnodigingen, meerdere stockrooms, voorraadbeheer en auditlog")
     httpd.serve_forever()
+

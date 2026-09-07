@@ -104,7 +104,7 @@
       else { box.classList.remove('show'); box.innerHTML = ''; }
     }
     if (!me?.permissions.manageItems) return;
-    document.getElementById('inventoryAdminBody').innerHTML = items.map(i => `<tr data-item-row="${esc(i.id)}"><td><strong>${esc(i.name)}</strong><br><small>${esc(i.sku)}</small></td><td><input data-field="category" value="${esc(i.category || '')}" placeholder="Categorie"></td><td><input data-field="supplier" value="${esc(i.supplier || '')}" placeholder="Leverancier"></td><td><input data-field="min_stock" type="number" min="0" step="1" value="${Number(i.minStock || 0)}"></td><td><input data-field="delta" type="number" step="1" placeholder="+5 / -2"><input data-field="reason" style="margin-top:6px" placeholder="Reden"></td><td><div class="inventory-actions"><button data-save-meta="${esc(i.id)}">Opslaan</button><button data-correct="${esc(i.id)}">Corrigeer</button></div><small>Voorraad: ${Number(i.stock || 0)}</small></td></tr>`).join('') || '<tr><td colspan="6">Geen artikelen.</td></tr>';
+    document.getElementById('inventoryAdminBody').innerHTML = items.map(i => `<tr data-item-row="${esc(i.id)}"><td><strong>${esc(i.name)}</strong><br><small>${esc(i.sku)}</small></td><td><input data-field="category" value="${esc(i.category || '')}" placeholder="Categorie"></td><td><input data-field="supplier" value="${esc(i.supplier || '')}" placeholder="Leverancier"></td><td><input data-field="min_stock" type="number" min="0" step="1" value="${Number(i.minStock || 0)}"></td><td><input data-field="delta" type="number" step="0.1" placeholder="+0,1 / -0,1"><input data-field="reason" style="margin-top:6px" placeholder="Reden"></td><td><div class="inventory-actions"><button data-save-meta="${esc(i.id)}">Opslaan</button><button data-correct="${esc(i.id)}">Corrigeer</button></div><small>Voorraad: ${Number(i.stock || 0)}</small></td></tr>`).join('') || '<tr><td colspan="6">Geen artikelen.</td></tr>';
   }
 
   async function loadAudit() {
@@ -175,8 +175,9 @@
         await fetchJSON('/api/inventory/meta', {method:'POST',body});
         say('Artikelinstellingen opgeslagen.');
       } else {
-        const delta = row.querySelector('[data-field="delta"]').value; const reason = row.querySelector('[data-field="reason"]').value.trim();
-        if (!delta || Number(delta) === 0 || !reason) { say('Vul een correctie en reden in.', 'error'); return; }
+        const delta = row.querySelector('[data-field="delta"]').value.replace(',', '.'); const reason = row.querySelector('[data-field="reason"]').value.trim();
+        const numericDelta = Number(delta);
+        if (!delta || !Number.isFinite(numericDelta) || numericDelta === 0 || Math.abs(numericDelta * 10 - Math.round(numericDelta * 10)) > 1e-9 || !reason) { say('Vul een correctie per 0,1 en een reden in.', 'error'); return; }
         const body = new FormData(); body.set('item_id', id); body.set('delta', delta); body.set('reason', reason);
         await fetchJSON('/api/inventory/correct', {method:'POST',body});
         say('Voorraadcorrectie opgeslagen.');
@@ -190,3 +191,4 @@
   window.addEventListener('hashchange', () => { if (location.hash === '#settings') refreshFeatures(); });
   setTimeout(refreshFeatures, 100);
 })();
+
