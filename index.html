@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260907-1" />
+  <link rel="stylesheet" href="styles.css?v=20260907-2" />
 </head>
 <body>
   <div class="app-shell">
@@ -56,7 +56,7 @@
         </div>
       </section>
 
-      <section id="inventory" class="view"><div class="section-head"><div><p class="eyebrow">Actuele aantallen</p><h2>Voorraad</h2></div><div class="section-actions"><button class="button ghost" id="archiveBtn">Archief <span id="archiveCount">0</span></button><button class="button primary" data-add="item">＋ Nieuw item</button></div></div><article class="forecast-panel"><div class="panel-head"><div><p class="eyebrow">Vooruitkijken</p><h3>Voorraadprognose & besteladvies</h3><p class="forecast-help">Verkopen laatste 90 dagen · reserveringen · leveringen onderweg · 14 dagen levertijd · 30 dagen gewenste voorraad.</p></div><div class="forecast-summary" id="forecastSummary">Advies berekenen…</div></div><div class="forecast-table-wrap"><table><thead><tr><th>Artikel</th><th>Vrij</th><th>Verbruik</th><th>Dekking</th><th>Onderweg</th><th>Besteladvies</th></tr></thead><tbody id="forecastTable"></tbody></table></div></article><div class="table-card"><table><thead><tr><th>Item</th><th>SKU</th><th>Voorraad</th><th>Inkoopprijs</th><th>Verkoopprijs</th><th>Waarde</th><th aria-label="Acties"></th></tr></thead><tbody id="inventoryTable"></tbody></table></div></section>
+      <section id="inventory" class="view"><div class="section-head"><div><p class="eyebrow">Actuele aantallen</p><h2>Voorraad</h2></div><div class="section-actions"><button class="button ghost" id="archiveBtn">Archief <span id="archiveCount">0</span></button><button class="button primary" data-add="item">＋ Nieuw item</button></div></div><article class="forecast-panel"><div class="panel-head"><div><p class="eyebrow">Vooruitkijken</p><h3>Voorraadprognose & besteladvies</h3><p class="forecast-help">Verkopen laatste 90 dagen · reserveringen · leveringen onderweg · 14 dagen levertijd · 30 dagen gewenste voorraad.</p></div><div class="forecast-summary" id="forecastSummary">Advies berekenen…</div></div><div class="forecast-table-wrap"><table><thead><tr><th>Artikel</th><th>Vrij</th><th>Verbruik</th><th>Dekking</th><th>Onderweg</th><th>Besteladvies</th></tr></thead><tbody id="forecastTable"></tbody></table></div></article><div class="table-card inventory-table-card" tabindex="0" aria-label="Voorraadtabel, horizontaal scrollbaar op kleine schermen"><table><thead><tr><th>Item</th><th>SKU</th><th>Voorraad</th><th>Inkoopprijs</th><th>Verkoopprijs</th><th>Waarde</th><th aria-label="Acties"></th></tr></thead><tbody id="inventoryTable"></tbody></table></div></section>
       <section id="incoming" class="view"><div class="section-head"><div><p class="eyebrow">Bestellingen bij leveranciers</p><h2>Inkomend</h2></div><button class="button primary" data-add="incoming">＋ Inkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet geleverd</button><button class="filter" data-filter="done">Geleverd</button></div><div id="incomingCards" class="transaction-list"></div></section>
       <section id="outgoing" class="view"><div class="section-head"><div><p class="eyebrow">Verkopen aan klanten</p><h2>Uitgaand</h2></div><button class="button primary" data-add="outgoing">＋ Verkoop toevoegen</button></div><div class="filter-row"><button class="filter active" data-filter="all">Alles</button><button class="filter" data-filter="pending">Niet betaald</button><button class="filter" data-filter="done">Betaald</button></div><div id="outgoingCards" class="transaction-list"></div></section>
       <footer class="site-footer">© 2026 <a href="https://valerith.nl" target="_blank" rel="noopener noreferrer">Valerith.nl</a></footer>
@@ -88,9 +88,9 @@
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <button id="exportBtn" type="button" hidden aria-hidden="true" tabindex="-1"></button>
-  <script src="dashboard_metrics.js?v=20260907-1"></script>
-  <script src="inventory_forecast.js?v=20260907-1"></script>
-  <script src="app.js?v=20260907-1"></script>
+  <script src="dashboard_metrics.js?v=20260907-2"></script>
+  <script src="inventory_forecast.js?v=20260907-2"></script>
+  <script src="app.js?v=20260907-2"></script>
   <script>
     (() => {
       const greetingForHour = hour => {
@@ -119,3 +119,4 @@
   </script>
 </body>
 </html>
+
