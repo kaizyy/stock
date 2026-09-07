@@ -49,6 +49,7 @@ def check_permission_matrix() -> None:
 def check_web_feature_parity() -> None:
     index = read("index.html")
     metrics = read("dashboard_metrics.js")
+    forecast = read("inventory_forecast.js")
     settings = read("settings.js")
     features = read("features.js")
     optional_fix = read("features_optional_fix.js")
@@ -56,8 +57,9 @@ def check_web_feature_parity() -> None:
     app = read("app.js")
     dashboard = read("dashboard_runner.py")
     app_runner = read("app_runner.py")
-    require(index, ['id="overview"', 'id="inventory"', 'id="incoming"', 'id="outgoing"', 'id="transactionDialog"', 'id="archiveDialog"', 'id="quickAddBtn"', 'id="inventoryBuyValue"', 'id="revenueValue"', 'id="outstandingValue"', 'id="outstandingOverdueValue"', 'id="expectedValue"', 'id="expectedPaidValue"', 'id="expectedUnpaidValue"', 'id="stockChart"', 'id="revenueChart"', 'app.js?v=', 'styles.css?v='], "Webdashboard en cacheverversing")
+    require(index, ['id="overview"', 'id="inventory"', 'id="incoming"', 'id="outgoing"', 'id="transactionDialog"', 'id="archiveDialog"', 'id="quickAddBtn"', 'id="inventoryBuyValue"', 'id="revenueValue"', 'id="outstandingValue"', 'id="outstandingOverdueValue"', 'id="expectedValue"', 'id="expectedPaidValue"', 'id="expectedUnpaidValue"', 'id="stockChart"', 'id="revenueChart"', 'id="forecastTable"', 'id="forecastSummary"', 'inventory_forecast.js?v=', 'app.js?v=', 'styles.css?v='], "Webdashboard en cacheverversing")
     require(metrics, ["expectedPaidTotal", "expectedUnpaidTotal", "overdueTotal", "recentTotal", "isLowStock", "stockAfterTransactionRemoval"], "Overzichtsberekeningen en voorraadherberekening")
+    require(forecast, ["historyDays", "horizonDays", "leadDays", "reservedByItem", "recommended", "daysCover", "urgency"], "Voorraadprognose en besteladvies")
     require(settings, ["settingsButton.dataset.view = 'settings'", 'Gebruikers & rollen', 'Mijn account', 'Account permanent verwijderen', '/api/members', '/members/add', '/members/role', '/members/remove', '/account/delete', 'body[data-stockroom-role="viewer"]', 'body[data-stockroom-role="buyer"]', 'body[data-stockroom-role="seller"]'], "Instellingen")
     require(features, ['Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog', 'Auditlog wissen', '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit', '/api/audit/clear', '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad'], "Beheerfuncties")
     require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "if (!delta || Number(delta) === 0 || !Number.isFinite(Number(delta)))"], "Optionele voorraadcorrectievelden")
