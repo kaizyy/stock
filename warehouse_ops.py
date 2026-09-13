@@ -27,6 +27,7 @@ def initialize_warehouse_ops():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_ops_room_created ON warehouse_operations(stockroom_id,created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_ops_room_item_created ON warehouse_operations(stockroom_id,item_id,created_at DESC)")
         conn.commit()
 
 
@@ -82,6 +83,18 @@ def history(stockroom_id, limit=100):
                FROM warehouse_operations WHERE stockroom_id=%s
                ORDER BY created_at DESC LIMIT %s""",
             (stockroom_id, max(1, min(int(limit), 250))),
+        ).fetchall()
+
+
+def history_for_item(stockroom_id, item_id):
+    with server.db() as conn:
+        return conn.execute(
+            """SELECT id::text,operation_type,item_id,item_name,quantity::float8,
+                      previous_stock::float8,new_stock::float8,related_stockroom_id::text,
+                      reference,note,created_at
+               FROM warehouse_operations WHERE stockroom_id=%s AND item_id=%s
+               ORDER BY created_at DESC,id DESC""",
+            (stockroom_id, item_id),
         ).fetchall()
 
 
@@ -241,3 +254,4 @@ def apply_transfer(session, values):
         )
         conn.commit()
     return {"transferRef": transfer_ref, "sourceStock": previous_source - qty, "destinationStock": previous_dest + qty}
+

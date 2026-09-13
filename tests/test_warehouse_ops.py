@@ -95,6 +95,23 @@ class WarehouseOperationTests(unittest.TestCase):
         warehouse_ops.initialize_warehouse_ops()
         warehouse_ops.initialize_warehouse_ops()
 
+    def test_item_history_is_complete_and_tenant_scoped(self):
+        with server.db() as conn:
+            for index in range(110):
+                conn.execute("""INSERT INTO warehouse_operations
+                    (id,stockroom_id,operation_type,item_id,item_name,quantity,previous_stock,new_stock)
+                    VALUES(%s,%s,'count','item-a','Widget',1,9,10)""", (uuid.uuid4(), self.room_a))
+            conn.execute("""INSERT INTO warehouse_operations
+                (id,stockroom_id,operation_type,item_id,item_name,quantity,previous_stock,new_stock)
+                VALUES(%s,%s,'count','item-a','Widget',1,9,10),
+                      (%s,%s,'count','item-b','Ander',1,9,10)""",
+                (uuid.uuid4(), self.room_b, uuid.uuid4(), self.room_a))
+            conn.commit()
+        self.assertEqual(len(warehouse_ops.history_for_item(str(self.room_a), 'item-a')), 110)
+        self.assertEqual(len(warehouse_ops.history_for_item(str(self.room_b), 'item-a')), 1)
+        self.assertEqual(len(warehouse_ops.history_for_item(str(self.room_a), 'item-b')), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

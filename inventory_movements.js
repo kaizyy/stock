@@ -4,9 +4,11 @@
   let selectedId = null;
   let currentState = {items: [], transactions: []};
   let reservations = [];
+  let itemTransactions = [];
   let warehouseHistory = [];
   let loading = false;
-  let warehouseError = false;
+  let movementError = false;
+  let requestId = 0;
 
   function entriesFor(itemId, transactions, operations) {
     const entries = [];
@@ -82,30 +84,37 @@
     document.getElementById('movementReservations').innerHTML = sources.length
       ? sources.map(source => `<li><span>${escapeHtml(source.label || (source.type === 'invoice' ? 'Factuur' : 'Verkooporder'))}</span><strong>${amount(source.quantity)} gereserveerd</strong></li>`).join('')
       : '<li>Geen actieve reserveringen.</li>';
-    const entries = entriesFor(selectedId, currentState.transactions, warehouseHistory);
-    document.getElementById('downloadMovements').disabled = loading || warehouseError;
-    const note = warehouseError ? '<p class="movement-note">Magazijnmutaties konden niet worden geladen. Vernieuw om opnieuw te proberen.</p>' : '';
+    const entries = entriesFor(selectedId, itemTransactions, warehouseHistory);
+    document.getElementById('downloadMovements').disabled = loading || movementError;
+    const note = movementError ? '<p class="movement-note">Mutaties konden niet volledig worden geladen. Vernieuw om opnieuw te proberen.</p>' : '';
     document.getElementById('movementEntries').innerHTML = `${note}${loading ? '<p class="movement-note">Mutaties laden…</p>' : ''}${entries.length
       ? entries.map(entry => `<li><div><strong>${escapeHtml(entry.label)}</strong><small>${entry.date && !Number.isNaN(Date.parse(entry.date)) ? new Date(entry.date).toLocaleString('nl-NL') : 'Datum onbekend'}${entry.detail ? ` · ${escapeHtml(entry.detail)}` : ''}</small></div><span class="${entry.delta < 0 ? 'negative-value' : 'positive-value'}">${entry.delta > 0 ? '+' : ''}${amount(entry.delta)}</span></li>`).join('')
       : '<li>Geen geboekte mutaties voor dit artikel.</li>'}`;
   }
 
-  async function loadWarehouseHistory() {
-    loading = true; warehouseError = false; render();
+  async function loadMovements() {
+    const itemId = selectedId;
+    const currentRequest = ++requestId;
+    itemTransactions = [];
+    warehouseHistory = [];
+    loading = true; movementError = false; render();
     try {
-      const response = await fetch('/api/warehouse', {cache:'no-store'});
-      if (!response.ok) throw new Error('Magazijnmutaties laden mislukt.');
+      const response = await fetch(`/api/inventory/movements?item_id=${encodeURIComponent(itemId)}`, {cache:'no-store'});
+      if (!response.ok) throw new Error('Mutaties laden mislukt.');
       const data = await response.json();
+      if (currentRequest !== requestId || selectedId !== itemId) return;
+      itemTransactions = data.transactions || [];
       warehouseHistory = data.history || [];
-    } catch { warehouseError = true; }
+    } catch { if (currentRequest === requestId) movementError = true; }
+    if (currentRequest !== requestId || selectedId !== itemId) return;
     loading = false; render();
   }
 
   function downloadCsv() {
-    if (!selectedId || loading || warehouseError) return;
+    if (!selectedId || loading || movementError) return;
     const item = (currentState.items || []).find(row => String(row.id) === String(selectedId));
     if (!item) return;
-    const blob = new Blob([csvFor(item, entriesFor(selectedId, currentState.transactions, warehouseHistory))],
+    const blob = new Blob([csvFor(item, entriesFor(selectedId, itemTransactions, warehouseHistory))],
       {type:'text/csv;charset=utf-8'});
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -122,10 +131,10 @@
     if (button) {
       selectedId = selectedId === button.dataset.showMovements ? null : button.dataset.showMovements;
       render();
-      if (selectedId) { document.getElementById('movementPanel')?.scrollIntoView({behavior:'smooth', block:'nearest'}); loadWarehouseHistory(); }
+      if (selectedId) { document.getElementById('movementPanel')?.scrollIntoView({behavior:'smooth', block:'nearest'}); loadMovements(); }
     }
     if (event.target.closest('#closeMovements')) { selectedId = null; render(); }
-    if (event.target.closest('#refreshMovements') && selectedId) loadWarehouseHistory();
+    if (event.target.closest('#refreshMovements') && selectedId) loadMovements();
     if (event.target.closest('#downloadMovements')) downloadCsv();
   });
 

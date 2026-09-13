@@ -126,6 +126,19 @@ class ExtendedHandler(app_runner.AppHandler):
             p=warehouse.permissions(s['role'])
             if not p['read']:self.send_json(403,{"error":"Geen rechten."});return
             self.send_json(200,{"warehousePermissions":p,"targets":warehouse.transfer_targets(s['user_id'],s['stockroom_id']) if p['transfer'] else [],"history":warehouse.history(s['stockroom_id'])});return
+        if path=="/api/inventory/movements":
+            s=self.require_session(api=True)
+            if not s:return
+            if not warehouse.permissions(s['role'])['read']:self.send_json(403,{"error":"Geen rechten."});return
+            item_id=parse_qs(parsed.query).get('item_id',[''])[0].strip()
+            if not item_id:self.send_json(400,{"error":"Kies een artikel."});return
+            with server.db() as conn:
+                row=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(s['stockroom_id'],)).fetchone()
+            state=(row or {}).get('state') or {}
+            if not any(str(item.get('id'))==item_id for item in state.get('items',[])):
+                self.send_json(404,{"error":"Artikel niet gevonden."});return
+            transactions=[tx for tx in state.get('transactions',[]) if str(tx.get('itemId'))==item_id]
+            self.send_json(200,{"transactions":transactions,"history":warehouse.history_for_item(s['stockroom_id'],item_id)});return
         return super().do_GET()
     def do_POST(self):
         path=urlparse(self.path).path
