@@ -50,6 +50,7 @@ def check_web_feature_parity() -> None:
     index = read("index.html")
     metrics = read("dashboard_metrics.js")
     forecast = read("inventory_forecast.js")
+    movements = read("inventory_movements.js")
     settings = read("settings.js")
     features = read("features.js")
     optional_fix = read("features_optional_fix.js")
@@ -61,6 +62,8 @@ def check_web_feature_parity() -> None:
     require(index, ['id="overview"', 'id="inventory"', 'id="incoming"', 'id="outgoing"', 'id="transactionDialog"', 'id="archiveDialog"', 'id="quickAddBtn"', 'id="inventoryBuyValue"', 'id="revenueValue"', 'id="outstandingValue"', 'id="outstandingOverdueValue"', 'id="expectedValue"', 'id="expectedPaidValue"', 'id="expectedUnpaidValue"', 'id="stockChart"', 'id="revenueChart"', 'id="forecastTable"', 'id="forecastSummary"', 'inventory_forecast.js?v=', 'app.js?v=', 'styles.css?v='], "Webdashboard en cacheverversing")
     require(metrics, ["expectedPaidTotal", "expectedUnpaidTotal", "overdueTotal", "recentTotal", "isLowStock", "stockAfterTransactionRemoval"], "Overzichtsberekeningen en voorraadherberekening")
     require(forecast, ["historyDays", "horizonDays", "leadDays", "reservedByItem", "recommended", "daysCover", "urgency"], "Voorraadprognose en besteladvies")
+    require(index, ['id="movementPanel"', 'id="movementEntries"', 'id="movementReservations"', 'inventory_movements.js?v='], "Voorraadmutaties per artikel")
+    require(movements, ["entriesFor", "reservation?.sources", "warehouseHistory", "Voorraadcorrectie"], "Voorraadmutaties en reserveringen")
     require(settings, ["settingsButton.dataset.view = 'settings'", 'Gebruikers & rollen', 'Mijn account', 'Account permanent verwijderen', '/api/members', '/members/add', '/members/role', '/members/remove', '/account/delete', 'body[data-stockroom-role="viewer"]', 'body[data-stockroom-role="buyer"]', 'body[data-stockroom-role="seller"]'], "Instellingen")
     require(features, ['Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog', 'Auditlog wissen', '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit', '/api/audit/clear', '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad', 'step="0.1"'], "Beheerfuncties")
     require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "numericDelta * 10", "+0,1 of -0,1"], "Optionele voorraadcorrectievelden")
@@ -68,7 +71,7 @@ def check_web_feature_parity() -> None:
     require(app, ["transactionDate", "storedTransactionDate", "data-edit-transaction", "data-delete-transaction", "Uitgaande bestelling bijgewerkt."], "Handmatige transactiedatum en transacties bewerken/verwijderen")
     require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations', 'parse_stock_delta', 'decimal_json_number'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
-    require(dockerfile, ["inventory_forecast.js", "/app/public/"], "Productie-assets voorraadprognose")
+    require(dockerfile, ["inventory_forecast.js", "inventory_movements.js", "/app/public/"], "Productie-assets voorraad")
 
 
 def check_android_shell() -> None:
