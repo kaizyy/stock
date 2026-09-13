@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {entriesFor} = require('../inventory_movements.js');
+const {entriesFor, csvFor, csvFilename} = require('../inventory_movements.js');
 
 const transactions = [
   {id:'incoming', itemId:'a', type:'incoming', qty:0.1, done:true, date:'2026-09-01T10:00:00Z'},
@@ -20,5 +20,11 @@ assert.deepEqual(rows.map(row => row.id), ['warehouse:transfer', 'warehouse:coun
 assert.deepEqual(rows.map(row => Math.round(row.delta * 10) / 10), [-0.2, 0.1, 0.1, -0.1, -0.2, 0.1]);
 assert.equal(rows.find(row => row.id === 'tx:correction').detail, 'Telling');
 assert.equal(entriesFor('b', transactions, operations).length, 1, 'andere artikelen blijven buiten beeld');
+const csv = csvFor({name:'Artikel "A"', sku:'A/1'}, [
+  {date:'2026-09-03T10:00:00Z', label:'Voorraadcorrectie', delta:-0.1, detail:'=SUM(1;2)'},
+]);
+assert.ok(csv.startsWith('\uFEFF"Artikel";"SKU";"Datum";"Soort";"Verschil";"Referentie / toelichting"\r\n'));
+assert.ok(csv.includes('"Artikel ""A""";"A/1";"2026-09-03T10:00:00Z";"Voorraadcorrectie";"-0,1";"\'=SUM(1;2)"'));
+assert.equal(csvFilename({sku:'A/1'}), 'voorraadmutaties-A-1.csv');
 console.log('PASS inventory movements per item');
 

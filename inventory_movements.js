@@ -42,8 +42,27 @@
     return entries.sort((a, b) => (Date.parse(b.date || 0) || 0) - (Date.parse(a.date || 0) || 0));
   }
 
+  function csvCell(value, protectFormula = true) {
+    let text = String(value ?? '');
+    if (protectFormula && /^[\s]*[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  function csvFor(item, entries) {
+    const header = ['Artikel', 'SKU', 'Datum', 'Soort', 'Verschil', 'Referentie / toelichting'];
+    const rows = entries.map(entry => [item.name, item.sku || '', entry.date || '', entry.label,
+      Number(entry.delta).toLocaleString('nl-NL', {useGrouping:false, maximumFractionDigits:3}), entry.detail || '']);
+    return '\uFEFF' + [header, ...rows].map(row => row.map((cell, index) => csvCell(cell, index !== 4)).join(';')).join('\r\n') + '\r\n';
+  }
+
+  function csvFilename(item) {
+    const identifier = String(item.sku || item.name || 'artikel').normalize('NFKD')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'artikel';
+    return `voorraadmutaties-${identifier}.csv`;
+  }
+
   if (typeof document === 'undefined') {
-    if (typeof module !== 'undefined') module.exports = {entriesFor};
+    if (typeof module !== 'undefined') module.exports = {entriesFor, csvFor, csvFilename};
     return;
   }
 
@@ -64,6 +83,7 @@
       ? sources.map(source => `<li><span>${escapeHtml(source.label || (source.type === 'invoice' ? 'Factuur' : 'Verkooporder'))}</span><strong>${amount(source.quantity)} gereserveerd</strong></li>`).join('')
       : '<li>Geen actieve reserveringen.</li>';
     const entries = entriesFor(selectedId, currentState.transactions, warehouseHistory);
+    document.getElementById('downloadMovements').disabled = loading || warehouseError;
     const note = warehouseError ? '<p class="movement-note">Magazijnmutaties konden niet worden geladen. Vernieuw om opnieuw te proberen.</p>' : '';
     document.getElementById('movementEntries').innerHTML = `${note}${loading ? '<p class="movement-note">Mutaties laden…</p>' : ''}${entries.length
       ? entries.map(entry => `<li><div><strong>${escapeHtml(entry.label)}</strong><small>${entry.date && !Number.isNaN(Date.parse(entry.date)) ? new Date(entry.date).toLocaleString('nl-NL') : 'Datum onbekend'}${entry.detail ? ` · ${escapeHtml(entry.detail)}` : ''}</small></div><span class="${entry.delta < 0 ? 'negative-value' : 'positive-value'}">${entry.delta > 0 ? '+' : ''}${amount(entry.delta)}</span></li>`).join('')
@@ -81,6 +101,22 @@
     loading = false; render();
   }
 
+  function downloadCsv() {
+    if (!selectedId || loading || warehouseError) return;
+    const item = (currentState.items || []).find(row => String(row.id) === String(selectedId));
+    if (!item) return;
+    const blob = new Blob([csvFor(item, entriesFor(selectedId, currentState.transactions, warehouseHistory))],
+      {type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = csvFilename(item);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   document.addEventListener('click', event => {
     const button = event.target.closest('[data-show-movements]');
     if (button) {
@@ -90,6 +126,7 @@
     }
     if (event.target.closest('#closeMovements')) { selectedId = null; render(); }
     if (event.target.closest('#refreshMovements') && selectedId) loadWarehouseHistory();
+    if (event.target.closest('#downloadMovements')) downloadCsv();
   });
 
   window.StockroomMovements = {entriesFor, renderState(state, activeReservations) {
