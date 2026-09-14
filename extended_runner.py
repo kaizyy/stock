@@ -11,6 +11,7 @@ import app_runner
 import order_management as orders
 import order_delete
 import warehouse_ops as warehouse
+import inventory_reconciliation
 import business_tools
 import platform_admin
 import billing
@@ -139,6 +140,16 @@ class ExtendedHandler(app_runner.AppHandler):
                 self.send_json(404,{"error":"Artikel niet gevonden."});return
             transactions=[tx for tx in state.get('transactions',[]) if str(tx.get('itemId'))==item_id]
             self.send_json(200,{"transactions":transactions,"history":warehouse.history_for_item(s['stockroom_id'],item_id)});return
+        if path=="/api/inventory/reconciliation":
+            s=self.require_session(api=True)
+            if not s:return
+            if not warehouse.permissions(s['role'])['read']:self.send_json(403,{"error":"Geen rechten."});return
+            with server.db() as conn:
+                row=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(s['stockroom_id'],)).fetchone()
+                operations=conn.execute("""SELECT item_id,operation_type,previous_stock::float8,new_stock::float8,created_at
+                    FROM warehouse_operations WHERE stockroom_id=%s AND operation_type IN ('count','transfer_in','transfer_out')
+                    ORDER BY created_at,id""",(s['stockroom_id'],)).fetchall()
+            self.send_json(200,{"items":inventory_reconciliation.reconcile((row or {}).get('state') or {},operations)});return
         return super().do_GET()
     def do_POST(self):
         path=urlparse(self.path).path
