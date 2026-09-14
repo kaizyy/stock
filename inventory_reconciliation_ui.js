@@ -18,11 +18,11 @@
     const status = document.getElementById('reconciliationSummary');
     const body = document.getElementById('reconciliationTable');
     if (!status || !body) return;
-    status.textContent = `${summary.differences} mogelijke afwijking${summary.differences === 1 ? '' : 'en'} · ${summary.checked} gecontroleerd · ${summary.unavailable} zonder betrouwbare basis`;
+    status.textContent = `${summary.differences} afwijking${summary.differences === 1 ? '' : 'en'} · ${summary.checked} gecontroleerd · ${summary.unavailable} zonder logbasis`;
     status.classList.toggle('reconciliation-warning', summary.differences > 0);
     body.innerHTML = rows.length ? rows.map(row => {
-      const label = row.status === 'difference' ? 'Mogelijk verschil' : row.status === 'ok' ? 'In balans' : 'Niet controleerbaar';
-      const date = row.counted_at && !Number.isNaN(Date.parse(row.counted_at)) ? new Date(row.counted_at).toLocaleDateString('nl-NL') : 'Geen telling';
+      const label = row.status === 'difference' ? 'Verschil' : row.status === 'ok' ? 'In balans' : 'Niet controleerbaar';
+      const date = row.started_at && !Number.isNaN(Date.parse(row.started_at)) ? `Log sinds ${new Date(row.started_at).toLocaleDateString('nl-NL')}` : 'Geen logstart';
       const difference = row.difference == null ? '—' : `${row.difference > 0 ? '+' : ''}${quantity(row.difference)}`;
       return `<tr class="reconciliation-${escapeHtml(row.status)}"><td><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.sku)}</small></td><td>${quantity(row.actual)}</td><td>${quantity(row.expected)}</td><td><strong>${difference}</strong></td><td><span class="pill ${row.status === 'difference' ? 'warn' : row.status === 'ok' ? 'good' : ''}">${label}</span><small>${date}</small></td></tr>`;
     }).join('') : '<tr><td colspan="5" class="empty">Geen voorraadartikelen.</td></tr>';

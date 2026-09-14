@@ -2,6 +2,7 @@ import json
 import uuid
 
 import server
+import inventory_ledger
 
 PURCHASE_STATUSES = {"draft", "ordered", "partial", "received", "cancelled"}
 SALES_STATUSES = {"draft", "processing", "shipped", "completed", "paid", "cancelled"}
@@ -446,6 +447,7 @@ def _book_inventory(conn, session, order, lines, state):
             }
         state.setdefault("transactions", []).append(tx)
 
+    inventory_ledger.set_context(conn, f"{order_type}_order_booking", order["reference"] or str(order["id"]))
     conn.execute(
         "UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",
         (json.dumps(state, ensure_ascii=False), session["stockroom_id"]),
@@ -538,3 +540,4 @@ def update_order_status(session, expected_type, values):
         )
         conn.commit()
     return expected_type
+

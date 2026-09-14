@@ -10,6 +10,7 @@ from urllib.parse import urlparse, parse_qs
 
 import server
 import runner
+import inventory_ledger
 
 ROLE_OPTIONS = [
     {"value": "member", "label": "Gebruiker"},
@@ -525,6 +526,7 @@ class DashboardHandler(runner.StockroomHandler):
                     return
                 before = {"category": target.get("category", ""), "supplier": target.get("supplier", ""), "minStock": target.get("minStock", 0)}
                 target.update({"category": category, "supplier": supplier, "minStock": min_stock})
+                inventory_ledger.set_context(conn, "item_settings")
                 conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
                 audit(conn, session, "item.settings_changed", {"item": target.get("name"), "before": before, "after": {"category": category, "supplier": supplier, "minStock": min_stock}})
                 conn.commit()
@@ -568,6 +570,7 @@ class DashboardHandler(runner.StockroomHandler):
                 delta = decimal_json_number(delta_decimal)
                 target["stock"] = new_stock
                 state.setdefault("transactions", []).append({"id": str(uuid.uuid4()), "type": "adjustment", "itemId": item_id, "qty": delta, "reason": reason, "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+                inventory_ledger.set_context(conn, "manual_correction", reason)
                 conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
                 audit(conn, session, "inventory.corrected", {"item": target.get("name"), "from": old_stock, "to": new_stock, "delta": delta, "reason": reason})
                 conn.commit()
@@ -610,6 +613,7 @@ class DashboardHandler(runner.StockroomHandler):
             if session["role"] in ("buyer", "seller") and not specialized_allowed(session["role"], old_state, value):
                 self.send_json(403, {"error": "Deze wijziging past niet binnen je rol."})
                 return
+            inventory_ledger.set_context(conn, "web_state_update")
             conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(value, ensure_ascii=False), session["stockroom_id"]))
             summary = state_change_summary(old_state, value)
             if summary["items"] or summary["transactionChanges"]:

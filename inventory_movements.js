@@ -6,6 +6,7 @@
   let reservations = [];
   let itemTransactions = [];
   let warehouseHistory = [];
+  let ledgerEntries = [];
   let loading = false;
   let movementError = false;
   let requestId = 0;
@@ -90,6 +91,16 @@
     document.getElementById('movementEntries').innerHTML = `${note}${loading ? '<p class="movement-note">Mutaties laden…</p>' : ''}${entries.length
       ? entries.map(entry => `<li><div><strong>${escapeHtml(entry.label)}</strong><small>${entry.date && !Number.isNaN(Date.parse(entry.date)) ? new Date(entry.date).toLocaleString('nl-NL') : 'Datum onbekend'}${entry.detail ? ` · ${escapeHtml(entry.detail)}` : ''}</small></div><span class="${entry.delta < 0 ? 'negative-value' : 'positive-value'}">${entry.delta > 0 ? '+' : ''}${amount(entry.delta)}</span></li>`).join('')
       : '<li>Geen geboekte mutaties voor dit artikel.</li>'}`;
+    const ledger = document.getElementById('movementLedger');
+    if (ledger) ledger.innerHTML = ledgerEntries.length ? ledgerEntries.map(entry => {
+      const source = ({opening_balance:'Startstand log', item_created:'Artikel aangemaakt', item_removed:'Artikel verwijderd',
+        manual_correction:'Voorraadcorrectie', stock_count:'Voorraadtelling', sales_return:'Verkoopretour',
+        purchase_return:'Inkoopretour', stock_transfer:'Transfer', purchase_order_booking:'Inkooporder geboekt',
+        sales_order_booking:'Verkooporder geboekt', order_deleted:'Order teruggedraaid',
+        inventory_import:'Voorraadimport', web_state_update:'Handmatige wijziging'})[entry.source] || 'Voorraadwijziging';
+      const date = entry.created_at && !Number.isNaN(Date.parse(entry.created_at)) ? new Date(entry.created_at).toLocaleString('nl-NL') : 'Datum onbekend';
+      return `<li><div><strong>${escapeHtml(source)}</strong><small>${date}${entry.reference ? ` · ${escapeHtml(entry.reference)}` : ''}</small><small>${amount(entry.previous_stock)} → ${amount(entry.new_stock)}</small></div><span class="${Number(entry.delta) < 0 ? 'negative-value' : 'positive-value'}">${Number(entry.delta) > 0 ? '+' : ''}${amount(entry.delta)}</span></li>`;
+    }).join('') : '<li>Het voorraadlog bevat nog geen gebeurtenissen voor dit artikel.</li>';
   }
 
   async function loadMovements() {
@@ -97,6 +108,7 @@
     const currentRequest = ++requestId;
     itemTransactions = [];
     warehouseHistory = [];
+    ledgerEntries = [];
     loading = true; movementError = false; render();
     try {
       const response = await fetch(`/api/inventory/movements?item_id=${encodeURIComponent(itemId)}`, {cache:'no-store'});
@@ -105,6 +117,7 @@
       if (currentRequest !== requestId || selectedId !== itemId) return;
       itemTransactions = data.transactions || [];
       warehouseHistory = data.history || [];
+      ledgerEntries = data.ledger || [];
     } catch { if (currentRequest === requestId) movementError = true; }
     if (currentRequest !== requestId || selectedId !== itemId) return;
     loading = false; render();

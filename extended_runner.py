@@ -11,7 +11,7 @@ import app_runner
 import order_management as orders
 import order_delete
 import warehouse_ops as warehouse
-import inventory_reconciliation
+import inventory_ledger
 import business_tools
 import platform_admin
 import billing
@@ -139,17 +139,16 @@ class ExtendedHandler(app_runner.AppHandler):
             if not any(str(item.get('id'))==item_id for item in state.get('items',[])):
                 self.send_json(404,{"error":"Artikel niet gevonden."});return
             transactions=[tx for tx in state.get('transactions',[]) if str(tx.get('itemId'))==item_id]
-            self.send_json(200,{"transactions":transactions,"history":warehouse.history_for_item(s['stockroom_id'],item_id)});return
+            self.send_json(200,{"transactions":transactions,"history":warehouse.history_for_item(s['stockroom_id'],item_id),"ledger":inventory_ledger.rows_for_item(s['stockroom_id'],item_id)});return
         if path=="/api/inventory/reconciliation":
             s=self.require_session(api=True)
             if not s:return
             if not warehouse.permissions(s['role'])['read']:self.send_json(403,{"error":"Geen rechten."});return
             with server.db() as conn:
                 row=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(s['stockroom_id'],)).fetchone()
-                operations=conn.execute("""SELECT item_id,operation_type,previous_stock::float8,new_stock::float8,created_at
-                    FROM warehouse_operations WHERE stockroom_id=%s AND operation_type IN ('count','transfer_in','transfer_out')
-                    ORDER BY created_at,id""",(s['stockroom_id'],)).fetchall()
-            self.send_json(200,{"items":inventory_reconciliation.reconcile((row or {}).get('state') or {},operations)});return
+                ledger_rows=conn.execute("""SELECT item_id,previous_stock::text,new_stock::text,delta::text,
+                    source,created_at FROM inventory_ledger WHERE stockroom_id=%s ORDER BY id""",(s['stockroom_id'],)).fetchall()
+            self.send_json(200,{"items":inventory_ledger.reconcile((row or {}).get('state') or {},ledger_rows)});return
         return super().do_GET()
     def do_POST(self):
         path=urlparse(self.path).path
@@ -212,6 +211,6 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()
 

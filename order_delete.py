@@ -1,6 +1,7 @@
 import json
 
 import server
+import inventory_ledger
 
 
 def _find_item(state, item_id):
@@ -61,6 +62,7 @@ def delete_order(session, expected_type, values):
                 tx for tx in state.get("transactions", [])
                 if str(tx.get("orderId") or "") != order_id
             ]
+            inventory_ledger.set_context(conn, "order_deleted", order["reference"] or order_id)
             conn.execute(
                 "UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",
                 (json.dumps(state, ensure_ascii=False), session["stockroom_id"]),
@@ -83,3 +85,4 @@ def delete_order(session, expected_type, values):
         )
         conn.commit()
     return {"deleted": True, "inventoryReversed": reversed_inventory}
+

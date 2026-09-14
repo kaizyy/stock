@@ -1,5 +1,6 @@
 import json, uuid
 import server
+import inventory_ledger
 
 PREF_TYPES=('low_stock','unpaid','delivery','order','system')
 
@@ -98,6 +99,7 @@ def apply_import(session,kind,rows):
                 item=existing.get(r['sku'].lower())
                 if item: item.update({'name':r['name'],'stock':r['stock'],'buy':r['buy'],'sell':r['sell'],'barcode':r['barcode'],'location':r['location']})
                 else: state.setdefault('items',[]).append({'id':str(uuid.uuid4()),'name':r['name'],'sku':r['sku'],'stock':r['stock'],'buy':r['buy'],'sell':r['sell'],'barcode':r['barcode'],'location':r['location']})
+            inventory_ledger.set_context(conn, 'inventory_import')
             conn.execute('UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s',(json.dumps(state,ensure_ascii=False),session['stockroom_id']))
         else:
             table='customers' if kind=='customers' else 'suppliers'
@@ -144,3 +146,4 @@ def deliver_notification_emails(stockroom_id):
                     platform_admin.record_error('notification_email',type(exc).__name__,stockroom_id,r['user_id'],{'notificationType':ntype,'key':key})
                 except Exception: pass
     return {'delivered':delivered}
+

@@ -2,6 +2,7 @@ import json
 import uuid
 
 import server
+import inventory_ledger
 
 
 WRITE_ROLES = {"owner", "admin", "member"}
@@ -126,6 +127,7 @@ def apply_count(session, values):
         previous = float(item.get("stock") or 0)
         item["stock"] = actual
         difference = actual - previous
+        inventory_ledger.set_context(conn, "stock_count", note)
         conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
         op_id = str(uuid.uuid4())
         conn.execute(
@@ -169,6 +171,7 @@ def apply_return(session, values, kind):
             op_type = "purchase_return"
         item["stock"] = new_stock
         state.setdefault("transactions", []).append(tx)
+        inventory_ledger.set_context(conn, "sales_return" if kind == "sales" else "purchase_return", reference or note)
         conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
         op_id = str(uuid.uuid4())
         conn.execute(
@@ -233,9 +236,10 @@ def apply_transfer(session, values):
         previous_dest = float(dest_item.get("stock") or 0)
         source_item["stock"] = previous_source - qty
         dest_item["stock"] = previous_dest + qty
+        transfer_ref = str(uuid.uuid4())
+        inventory_ledger.set_context(conn, "stock_transfer", transfer_ref)
         conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(source_state, ensure_ascii=False), source_id))
         conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(dest_state, ensure_ascii=False), destination_id))
-        transfer_ref = str(uuid.uuid4())
         out_id, in_id = str(uuid.uuid4()), str(uuid.uuid4())
         conn.execute(
             """INSERT INTO warehouse_operations(id,stockroom_id,operation_type,item_id,item_name,quantity,previous_stock,new_stock,related_stockroom_id,reference,note,created_by)
