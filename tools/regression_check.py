@@ -63,6 +63,8 @@ def check_web_feature_parity() -> None:
     require(metrics, ["expectedPaidTotal", "expectedUnpaidTotal", "overdueTotal", "recentTotal", "isLowStock", "stockAfterTransactionRemoval"], "Overzichtsberekeningen en voorraadherberekening")
     require(forecast, ["historyDays", "horizonDays", "leadDays", "reservedByItem", "recommended", "daysCover", "urgency"], "Voorraadprognose en besteladvies")
     require(index, ['id="movementPanel"', 'id="movementEntries"', 'id="movementReservations"', 'id="downloadMovements"', 'inventory_movements.js?v=', 'id="reconciliationTable"', 'inventory_reconciliation_ui.js?v='], "Voorraadmutaties en verschillenrapport")
+    require(index, ['class="table-card inventory-table-card" tabindex="0"'], "Toegankelijke voorraadtabel")
+    require(read("styles.css"), [".inventory-table-card:focus-visible", ".inventory-metric{grid-column:1/-1}"], "Mobiele voorraadtabel")
     require(movements, ["entriesFor", "reservation?.sources", "warehouseHistory", "Voorraadcorrectie", "csvFor", "downloadCsv", "/api/inventory/movements?item_id="], "Volledige voorraadmutaties, reserveringen en CSV-export")
     require(read("extended_runner.py"), ['"/api/inventory/movements"', "warehouse.history_for_item", "item.get('id')"], "Artikelgerichte mutatie-API")
     require(read("extended_runner.py"), ['"/api/inventory/reconciliation"', "inventory_reconciliation.reconcile", "warehouse.permissions(s['role'])['read']"], "Voorraadverschillen-API")
