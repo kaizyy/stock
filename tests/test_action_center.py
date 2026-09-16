@@ -4,6 +4,7 @@ import unittest
 import uuid
 
 import business_tools
+import billing
 import dashboard_runner
 import documents_v3
 import financial_workflow
@@ -22,7 +23,7 @@ class ActionCenterTests(unittest.TestCase):
         server.DATABASE_URL = os.environ["TEST_DATABASE_URL"]
         server.initialize_database(); runner.migrate_roles(); dashboard_runner.initialize_enhancements()
         order_management.initialize_order_management(); business_tools.initialize_business_tools()
-        warehouse_ops.initialize_warehouse_ops(); documents_v3.initialize(); sales_workflow.initialize()
+        warehouse_ops.initialize_warehouse_ops(); billing.initialize_billing(); documents_v3.initialize(); sales_workflow.initialize()
         financial_workflow.initialize(); platform_admin.initialize_platform_admin()
 
     def setUp(self):
