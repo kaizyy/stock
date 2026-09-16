@@ -54,6 +54,7 @@
     finally { button.disabled = false; }
   });
 
+  document.addEventListener('stockroom:refresh', event => { if (event.detail?.view === 'inventory') refresh(); });
   ensurePanel(); refresh();
 })();
 

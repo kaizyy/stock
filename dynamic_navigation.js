@@ -37,6 +37,7 @@
 
     document.querySelector('.sidebar')?.classList.remove('open');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.dispatchEvent(new CustomEvent('stockroom:refresh', {detail:{view:id}}));
     return true;
   }
 

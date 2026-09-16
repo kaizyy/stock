@@ -88,5 +88,6 @@
   document.addEventListener('click',async e=>{if(e.target.closest('#refreshWarehouse'))refresh();const button=e.target.closest('[data-count-action]');if(!button)return;const action=button.dataset.countAction;if(action==='cancel'&&!confirm('Deze telling annuleren? De voorraad blijft ongewijzigd.'))return;const body=new FormData();body.set('count_id',button.dataset.countId);try{await api(`/api/warehouse/count/${action}`,{method:'POST',body});message(action==='submit'?'Telling ingediend.':action==='approve'?'Telling goedgekeurd en voorraad bijgewerkt.':'Telling geannuleerd.');await refresh()}catch(err){message(err.message,true)}});
 
   installUI();refresh();
+  document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='warehouse')refresh()});
 })();
 

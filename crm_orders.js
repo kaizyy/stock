@@ -78,6 +78,8 @@
   bindRelationForm('supplierForm','supplier');
   bindRelationForm('customerForm','customer');
   document.addEventListener('orders:refresh',refresh);
+  document.addEventListener('stockroom:refresh',event=>{if(['relations','orders'].includes(event.detail?.view))refresh()});
   document.getElementById('orderDialog').addEventListener('cancel',e=>{e.preventDefault();closeOrder()});
   refresh();
 })();
+

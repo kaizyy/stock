@@ -78,6 +78,8 @@ def check_web_feature_parity() -> None:
     require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "numericDelta * 10", "+0,1 of -0,1"], "Optionele voorraadcorrectievelden")
     require(role_dashboard, ["buyer", "seller", "viewer", "dashboardRole"], "Rolbewust dashboard")
     require(app, ["transactionDate", "storedTransactionDate", "data-edit-transaction", "data-delete-transaction", "Uitgaande bestelling bijgewerkt."], "Handmatige transactiedatum en transacties bewerken/verwijderen")
+    require(read("dynamic_navigation.js"), ["stockroom:refresh", "detail:{view:id}"], "Automatisch verversen bij navigatie")
+    require(app, ["stockroom:refresh", "navigationRefreshTimer", "loadState()"], "Kerngegevens verversen bij navigatie")
     require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations', 'parse_stock_delta', 'decimal_json_number'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
     require(dockerfile, ["inventory_forecast.js", "purchase_advice.js", "inventory_movements.js", "inventory_reconciliation_ui.js", "inventory_ledger.py", "/app/public/"], "Productie-assets voorraad")
