@@ -69,6 +69,8 @@ def check_web_feature_parity() -> None:
     require(read("extended_runner.py"), ['"/api/inventory/movements"', "warehouse.history_for_item", "item.get('id')"], "Artikelgerichte mutatie-API")
     require(read("extended_runner.py"), ['"/api/inventory/reconciliation"', "inventory_ledger.reconcile", "warehouse.permissions(s['role'])['read']"], "Voorraadverschillen-API")
     require(read("inventory_ledger.py"), ["def reconcile", "CREATE TRIGGER stockroom_inventory_ledger", "opening_balance", "difference"], "Vastgelegd voorraadlog")
+    require(read("warehouse_ops.py"), ["inventory_counts", "start_count", "save_count_line", "submit_count", "approve_count", "cancel_count", "inventory_count.approved"], "Gecontroleerde voorraadtelling")
+    require(read("warehouse_ops.js"), ["countStartForm", "barcodeCountForm", "data-count-line", "Indienen ter goedkeuring", "Goedkeuren en voorraad verwerken"], "Mobiele voorraadtelling")
     require(settings, ["settingsButton.dataset.view = 'settings'", 'Gebruikers & rollen', 'Mijn account', 'Account permanent verwijderen', '/api/members', '/members/add', '/members/role', '/members/remove', '/account/delete', 'body[data-stockroom-role="viewer"]', 'body[data-stockroom-role="buyer"]', 'body[data-stockroom-role="seller"]'], "Instellingen")
     require(features, ['Stockrooms', 'Uitnodigingen', 'Voorraadinstellingen', 'Auditlog', 'Auditlog wissen', '/api/stockrooms', '/api/stockrooms/create', '/api/invitations', '/api/audit', '/api/audit/clear', '/api/inventory/meta', '/api/inventory/correct', 'Lage voorraad', 'step="0.1"'], "Beheerfuncties")
     require(optional_fix, ["reasonInput?.value.trim() || 'Handmatige correctie'", "numericDelta * 10", "+0,1 of -0,1"], "Optionele voorraadcorrectievelden")

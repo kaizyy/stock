@@ -29,6 +29,25 @@ def initialize_warehouse_ops():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_ops_room_created ON warehouse_operations(stockroom_id,created_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_warehouse_ops_room_item_created ON warehouse_operations(stockroom_id,item_id,created_at DESC)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS inventory_counts (
+            id UUID PRIMARY KEY, stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,
+            title TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL CHECK (status IN ('draft','submitted','approved','cancelled')),
+            created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            submitted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), submitted_at TIMESTAMPTZ,
+            approved_at TIMESTAMPTZ, cancelled_at TIMESTAMPTZ)
+        """)
+        conn.execute("""CREATE TABLE IF NOT EXISTS inventory_count_lines (
+            count_id UUID NOT NULL REFERENCES inventory_counts(id) ON DELETE CASCADE,
+            item_id TEXT NOT NULL, item_name TEXT NOT NULL, sku TEXT NOT NULL DEFAULT '',
+            barcode TEXT NOT NULL DEFAULT '', expected_stock NUMERIC(14,3) NOT NULL,
+            counted_stock NUMERIC(14,3), buy_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+            counted_by UUID REFERENCES users(id) ON DELETE SET NULL, counted_at TIMESTAMPTZ,
+            PRIMARY KEY(count_id,item_id))
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inventory_counts_room_created ON inventory_counts(stockroom_id,created_at DESC)")
         conn.commit()
 
 
@@ -48,10 +67,146 @@ def permissions(role):
     return {
         "read": _role_can(role, "read"),
         "count": _role_can(role, "count"),
+        "approveCount": role in {"owner", "admin"},
         "salesReturn": _role_can(role, "sales_return"),
         "purchaseReturn": _role_can(role, "purchase_return"),
         "transfer": _role_can(role, "transfer"),
     }
+
+
+def count_sessions(stockroom_id):
+    with server.db() as conn:
+        sessions = conn.execute("""SELECT c.id::text,c.title,c.note,c.status,c.created_at,c.submitted_at,c.approved_at,
+                   creator.name created_by_name,approver.name approved_by_name,
+                   COUNT(l.*)::int line_count,COUNT(l.counted_stock)::int counted_count,
+                   COALESCE(SUM(CASE WHEN l.counted_stock IS NOT NULL THEN (l.counted_stock-l.expected_stock)*l.buy_price ELSE 0 END),0)::float8 variance_value
+            FROM inventory_counts c
+            LEFT JOIN inventory_count_lines l ON l.count_id=c.id
+            LEFT JOIN users creator ON creator.id=c.created_by LEFT JOIN users approver ON approver.id=c.approved_by
+            WHERE c.stockroom_id=%s GROUP BY c.id,creator.name,approver.name ORDER BY c.created_at DESC LIMIT 25""",
+            (stockroom_id,)).fetchall()
+        for count in sessions:
+            count["lines"] = conn.execute("""SELECT item_id,item_name,sku,barcode,expected_stock::float8,
+                       counted_stock::float8,buy_price::float8,counted_at
+                FROM inventory_count_lines WHERE count_id=%s ORDER BY lower(item_name),item_id""", (count["id"],)).fetchall()
+        return sessions
+
+
+def start_count(session, values):
+    if not _role_can(session["role"], "count"):
+        raise PermissionError("Geen rechten om een telling te starten.")
+    title = (values.get("title") or "Voorraadtelling").strip()[:160]
+    note = (values.get("note") or "").strip()[:1000]
+    with server.db() as conn:
+        active = conn.execute("SELECT 1 FROM inventory_counts WHERE stockroom_id=%s AND status IN ('draft','submitted')",
+                              (session["stockroom_id"],)).fetchone()
+        if active:
+            raise ValueError("Er staat al een telling open. Rond die eerst af of annuleer deze.")
+        room = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (session["stockroom_id"],)).fetchone()
+        items = [item for item in (room or {}).get("state", {}).get("items", []) if not item.get("archived")]
+        if not items:
+            raise ValueError("Er zijn geen actieve artikelen om te tellen.")
+        count_id = str(uuid.uuid4())
+        conn.execute("INSERT INTO inventory_counts(id,stockroom_id,title,note,status,created_by) VALUES(%s,%s,%s,%s,'draft',%s)",
+                     (count_id, session["stockroom_id"], title, note, session["user_id"]))
+        for item in items:
+            conn.execute("""INSERT INTO inventory_count_lines(count_id,item_id,item_name,sku,barcode,expected_stock,buy_price)
+                VALUES(%s,%s,%s,%s,%s,%s,%s)""", (count_id, str(item.get("id")), item.get("name") or "Artikel",
+                str(item.get("sku") or ""), str(item.get("barcode") or ""), float(item.get("stock") or 0), float(item.get("buy") or 0)))
+        _audit(conn, session, "inventory_count.started", {"countId": count_id, "title": title, "items": len(items)})
+        conn.commit()
+    return {"id": count_id}
+
+
+def save_count_line(session, values):
+    if not _role_can(session["role"], "count"):
+        raise PermissionError("Geen rechten om te tellen.")
+    count_id = (values.get("count_id") or "").strip()
+    lookup = (values.get("item_id") or values.get("barcode") or "").strip()
+    actual = _number(values.get("counted_stock"), "Geteld aantal", allow_zero=True)
+    with server.db() as conn:
+        count = conn.execute("SELECT status FROM inventory_counts WHERE id=%s AND stockroom_id=%s FOR UPDATE",
+                             (count_id, session["stockroom_id"])).fetchone()
+        if not count:
+            raise ValueError("Telling niet gevonden.")
+        if count["status"] != "draft":
+            raise ValueError("Deze telling kan niet meer worden gewijzigd.")
+        line = conn.execute("""SELECT item_id FROM inventory_count_lines WHERE count_id=%s
+            AND (item_id=%s OR NULLIF(barcode,'')=%s)""", (count_id, lookup, lookup)).fetchone()
+        if not line:
+            raise ValueError("Artikel of barcode staat niet in deze telling.")
+        conn.execute("UPDATE inventory_count_lines SET counted_stock=%s,counted_by=%s,counted_at=NOW() WHERE count_id=%s AND item_id=%s",
+                     (actual, session["user_id"], count_id, line["item_id"]))
+        conn.commit()
+    return {"itemId": line["item_id"], "countedStock": actual}
+
+
+def submit_count(session, values):
+    if not _role_can(session["role"], "count"):
+        raise PermissionError("Geen rechten om de telling in te dienen.")
+    count_id = (values.get("count_id") or "").strip()
+    with server.db() as conn:
+        count = conn.execute("SELECT status FROM inventory_counts WHERE id=%s AND stockroom_id=%s FOR UPDATE",
+                             (count_id, session["stockroom_id"])).fetchone()
+        if not count or count["status"] != "draft":
+            raise ValueError("Alleen een open telling kan worden ingediend.")
+        missing = conn.execute("SELECT COUNT(*) count FROM inventory_count_lines WHERE count_id=%s AND counted_stock IS NULL", (count_id,)).fetchone()["count"]
+        if missing:
+            raise ValueError(f"Tel eerst alle artikelen; nog {missing} niet geteld.")
+        conn.execute("UPDATE inventory_counts SET status='submitted',submitted_by=%s,submitted_at=NOW() WHERE id=%s", (session["user_id"], count_id))
+        _audit(conn, session, "inventory_count.submitted", {"countId": count_id})
+        conn.commit()
+    return {"submitted": True}
+
+
+def approve_count(session, values):
+    if session["role"] not in {"owner", "admin"}:
+        raise PermissionError("Alleen Owner of Admin kan een telling goedkeuren.")
+    count_id = (values.get("count_id") or "").strip()
+    with server.db() as conn:
+        count = conn.execute("SELECT * FROM inventory_counts WHERE id=%s AND stockroom_id=%s FOR UPDATE",
+                             (count_id, session["stockroom_id"])).fetchone()
+        if not count or count["status"] != "submitted":
+            raise ValueError("Alleen een ingediende telling kan worden goedgekeurd.")
+        room = conn.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE", (session["stockroom_id"],)).fetchone()
+        state = room["state"]
+        lines = conn.execute("SELECT * FROM inventory_count_lines WHERE count_id=%s ORDER BY item_id", (count_id,)).fetchall()
+        changed = []
+        for line in lines:
+            item = _find_item(state, line["item_id"])
+            current = float(item.get("stock") or 0) if item else None
+            if current is None or abs(current - float(line["expected_stock"])) > 0.0005:
+                raise ValueError(f"Voorraad van {line['item_name']} is gewijzigd sinds de telling startte. Annuleer en start een nieuwe telling.")
+            actual, difference = float(line["counted_stock"]), float(line["counted_stock"] - line["expected_stock"])
+            if abs(difference) <= 0.0005:
+                continue
+            item["stock"] = actual
+            op_id = str(uuid.uuid4())
+            conn.execute("""INSERT INTO warehouse_operations(id,stockroom_id,operation_type,item_id,item_name,quantity,previous_stock,new_stock,reference,note,created_by)
+                VALUES(%s,%s,'count',%s,%s,%s,%s,%s,%s,%s,%s)""", (op_id, session["stockroom_id"], line["item_id"],
+                line["item_name"], difference, float(line["expected_stock"]), actual, count_id, count["note"], session["user_id"]))
+            changed.append({"itemId": line["item_id"], "difference": difference, "value": difference * float(line["buy_price"])})
+        inventory_ledger.set_context(conn, "stock_count", count_id)
+        conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s", (json.dumps(state, ensure_ascii=False), session["stockroom_id"]))
+        conn.execute("UPDATE inventory_counts SET status='approved',approved_by=%s,approved_at=NOW() WHERE id=%s", (session["user_id"], count_id))
+        _audit(conn, session, "inventory_count.approved", {"countId": count_id, "changes": changed, "varianceValue": sum(row["value"] for row in changed)})
+        conn.commit()
+    return {"approved": True, "changes": len(changed)}
+
+
+def cancel_count(session, values):
+    if not _role_can(session["role"], "count"):
+        raise PermissionError("Geen rechten om de telling te annuleren.")
+    count_id = (values.get("count_id") or "").strip()
+    with server.db() as conn:
+        row = conn.execute("""UPDATE inventory_counts SET status='cancelled',cancelled_at=NOW()
+            WHERE id=%s AND stockroom_id=%s AND status IN ('draft','submitted') RETURNING id""",
+            (count_id, session["stockroom_id"])).fetchone()
+        if not row:
+            raise ValueError("Deze telling kan niet worden geannuleerd.")
+        _audit(conn, session, "inventory_count.cancelled", {"countId": count_id})
+        conn.commit()
+    return {"cancelled": True}
 
 
 def _find_item(state, item_id):

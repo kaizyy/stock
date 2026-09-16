@@ -6,6 +6,7 @@ import uuid
 import runner
 import server
 import warehouse_ops
+import inventory_ledger
 
 DB_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -30,6 +31,7 @@ class WarehouseOperationTests(unittest.TestCase):
         server.initialize_database()
         runner.migrate_roles()
         warehouse_ops.initialize_warehouse_ops()
+        inventory_ledger.initialize()
 
     def setUp(self):
         self.user = uuid.uuid4()
@@ -93,6 +95,33 @@ class WarehouseOperationTests(unittest.TestCase):
 
     def test_initialization_is_idempotent(self):
         warehouse_ops.initialize_warehouse_ops()
+
+    def test_count_workflow_requires_review_before_stock_changes(self):
+        count_id = warehouse_ops.start_count(self.session, {"title":"Maandtelling", "note":"controle"})["id"]
+        self.assertEqual(self.state(self.room_a)["items"][0]["stock"], 10)
+        warehouse_ops.save_count_line(self.session, {"count_id":count_id, "barcode":"871000000001", "counted_stock":"7.5"})
+        warehouse_ops.submit_count(self.session, {"count_id":count_id})
+        self.assertEqual(self.state(self.room_a)["items"][0]["stock"], 10)
+        result = warehouse_ops.approve_count(self.session, {"count_id":count_id})
+        self.assertEqual(result["changes"], 1)
+        self.assertEqual(self.state(self.room_a)["items"][0]["stock"], 7.5)
+        count = warehouse_ops.count_sessions(str(self.room_a))[0]
+        self.assertEqual(count["status"], "approved")
+        self.assertEqual(count["variance_value"], -10)
+
+    def test_count_approval_blocks_intervening_stock_change(self):
+        count_id = warehouse_ops.start_count(self.session, {"title":"Veilige telling"})["id"]
+        warehouse_ops.save_count_line(self.session, {"count_id":count_id, "item_id":"item-a", "counted_stock":"9"})
+        warehouse_ops.submit_count(self.session, {"count_id":count_id})
+        with server.db() as conn:
+            state = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (self.room_a,)).fetchone()["state"]
+            state["items"][0]["stock"] = 11
+            conn.execute("UPDATE stockrooms SET state=%s::jsonb WHERE id=%s", (json.dumps(state), self.room_a))
+            conn.commit()
+        with self.assertRaisesRegex(ValueError, "gewijzigd sinds"):
+            warehouse_ops.approve_count(self.session, {"count_id":count_id})
+        warehouse_ops.cancel_count(self.session, {"count_id":count_id})
+        self.assertEqual(self.state(self.room_a)["items"][0]["stock"], 11)
         warehouse_ops.initialize_warehouse_ops()
 
     def test_item_history_is_complete_and_tenant_scoped(self):
