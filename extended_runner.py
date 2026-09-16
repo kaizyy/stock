@@ -52,7 +52,7 @@ class ExtendedHandler(app_runner.AppHandler):
         if path in ("/","/index.html"):
             session=self.require_session(api=False)
             if not session:return
-            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260829-8"></script><script src="/settings_tools.js?v=20260829-8"></script><script src="/features.js?v=20260829-8"></script><script src="/features_optional_fix.js?v=20260829-8"></script><script src="/role_dashboard.js?v=20260829-8"></script><script src="/analytics_dashboard.js?v=20260829-8"></script><script src="/inventory_intelligence.js?v=20260829-8"></script><script src="/barcode_scanner_fallback.js?v=20260829-8"></script><script src="/dynamic_navigation.js?v=20260916-2"></script><script src="/crm_orders.js?v=20260916-2"></script><script src="/order_delete_ui.js?v=20260829-8"></script><script src="/warehouse_ops.js?v=20260916-2"></script><script src="/purchase_advice.js?v=20260916-2"></script><script src="/business_tools.js?v=20260829-8"></script><script src="/platform_admin_ui.js?v=20260829-8"></script><script src="/billing_ui.js?v=20260829-8"></script></body>');self.send_html(200,content);return
+            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260829-8"></script><script src="/settings_tools.js?v=20260829-8"></script><script src="/features.js?v=20260829-8"></script><script src="/features_optional_fix.js?v=20260829-8"></script><script src="/role_dashboard.js?v=20260829-8"></script><script src="/analytics_dashboard.js?v=20260829-8"></script><script src="/inventory_intelligence.js?v=20260829-8"></script><script src="/barcode_scanner_fallback.js?v=20260829-8"></script><script src="/dynamic_navigation.js?v=20260916-2"></script><script src="/crm_orders.js?v=20260916-2"></script><script src="/order_delete_ui.js?v=20260829-8"></script><script src="/warehouse_ops.js?v=20260916-2"></script><script src="/purchase_advice.js?v=20260916-2"></script><script src="/action_center.js?v=20260916-1"></script><script src="/business_tools.js?v=20260829-8"></script><script src="/platform_admin_ui.js?v=20260829-8"></script><script src="/billing_ui.js?v=20260829-8"></script></body>');self.send_html(200,content);return
         if path=="/api/account/sessions":
             s=self.require_session(api=True)
             if s:
@@ -77,6 +77,10 @@ class ExtendedHandler(app_runner.AppHandler):
             s=self.require_session(api=True)
             if s:
                 notes=platform_admin.stockroom_notifications(s['stockroom_id'],s['user_id']);notes=account_tools.filter_notifications(s,notes);self.send_json(200,{"notifications":notes,"unread":sum(1 for n in notes if not n.get('read'))})
+            return
+        if path=="/api/action-center":
+            s=self.require_session(api=True)
+            if s:self.send_json(200,{"actions":platform_admin.action_center(s['stockroom_id'],s['role'])})
             return
         if path=="/api/orders/detail":
             s=self.require_session(api=True)

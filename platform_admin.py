@@ -108,6 +108,45 @@ def stockroom_notifications(stockroom_id,user_id=None):
     return visible[:100]
 
 
+def action_center(stockroom_id, role):
+    actions=[]
+    can_manage = role in ('owner','admin','member')
+    can_purchase = can_manage or role == 'buyer'
+    can_sales = can_manage or role == 'seller'
+    with server.db() as conn:
+        row=conn.execute('SELECT state FROM stockrooms WHERE id=%s',(stockroom_id,)).fetchone();state=(row or {}).get('state') or {'items':[]}
+        for item in state.get('items',[]):
+            if item.get('archived'):continue
+            stock=float(item.get('stock') or 0);minimum=float(item.get('minStock') or 0)
+            if minimum>0 and stock<=minimum:
+                actions.append({'key':f"stock:{item.get('id')}",'severity':'danger' if stock<=0 else 'warning','title':f"Besteladvies: {item.get('name') or 'Artikel'}",'detail':f"{stock:g} beschikbaar · minimum {minimum:g}",'targetView':'inventory','actionLabel':'Besteladvies openen'})
+        if role in ('owner','admin'):
+            counts=conn.execute("SELECT id::text,title,submitted_at FROM inventory_counts WHERE stockroom_id=%s AND status='submitted' ORDER BY submitted_at",(stockroom_id,)).fetchall()
+            for count in counts:actions.append({'key':f"count:{count['id']}",'severity':'warning','title':'Voorraadtelling wacht op goedkeuring','detail':count['title'],'targetView':'warehouse','actionLabel':'Telling beoordelen'})
+        if can_purchase:
+            drafts=conn.execute("SELECT id::text,COALESCE(order_number,reference,'') number,relation_name,created_at FROM orders WHERE stockroom_id=%s AND order_type='purchase' AND status='draft' ORDER BY created_at",(stockroom_id,)).fetchall()
+            for order in drafts:actions.append({'key':f"purchase-draft:{order['id']}",'severity':'info','title':'Concept-inkooporder controleren','detail':f"{order['number'] or 'Concept'} · {order['relation_name'] or 'Geen leverancier'}",'targetView':'orders','actionLabel':'Order openen'})
+            late=conn.execute("SELECT id::text,COALESCE(order_number,reference,'') number,relation_name,order_date FROM orders WHERE stockroom_id=%s AND order_type='purchase' AND status IN ('ordered','partial') AND order_date<CURRENT_DATE-14 ORDER BY order_date",(stockroom_id,)).fetchall()
+            for order in late:actions.append({'key':f"late-delivery:{order['id']}",'severity':'warning','title':'Levering mogelijk te laat','detail':f"{order['number'] or 'Inkooporder'} · besteld op {order['order_date'].strftime('%d-%m-%Y')}",'targetView':'orders','actionLabel':'Levering bekijken'})
+        if can_sales:
+            invoices=conn.execute("""SELECT i.order_id::text id,i.invoice_number,i.due_date,o.relation_name
+                FROM invoice_documents i JOIN orders o ON o.id=i.order_id
+                WHERE i.stockroom_id=%s AND i.deleted_at IS NULL AND i.due_date<CURRENT_DATE AND i.paid_at IS NULL ORDER BY i.due_date""",(stockroom_id,)).fetchall()
+            for invoice in invoices:actions.append({'key':f"invoice:{invoice['id']}",'severity':'danger','title':f"Factuur {invoice['invoice_number']} is verlopen",'detail':f"{invoice['relation_name'] or 'Geen klant'} · vervallen {invoice['due_date'].strftime('%d-%m-%Y')}",'targetView':'finance','actionLabel':'Factuur openen'})
+            quote_invoices=conn.execute("SELECT id::text,invoice_number,due_date,relation_name FROM quotes WHERE stockroom_id=%s AND invoice_number IS NOT NULL AND converted_order_id IS NULL AND due_date<CURRENT_DATE AND invoice_paid_at IS NULL ORDER BY due_date",(stockroom_id,)).fetchall()
+            for invoice in quote_invoices:actions.append({'key':f"quote-invoice:{invoice['id']}",'severity':'danger','title':f"Factuur {invoice['invoice_number']} is verlopen",'detail':f"{invoice['relation_name'] or 'Geen klant'} · vervallen {invoice['due_date'].strftime('%d-%m-%Y')}",'targetView':'finance','actionLabel':'Factuur openen'})
+            quotes=conn.execute("SELECT id::text,quote_number,relation_name,sent_at FROM quotes WHERE stockroom_id=%s AND status='sent' AND converted_order_id IS NULL AND sent_at<NOW()-INTERVAL '7 days' ORDER BY sent_at",(stockroom_id,)).fetchall()
+            for quote in quotes:actions.append({'key':f"quote-followup:{quote['id']}",'severity':'info','title':f"Offerte {quote['quote_number']} opvolgen",'detail':f"{quote['relation_name'] or 'Geen klant'} · langer dan 7 dagen verzonden",'targetView':'quotes','actionLabel':'Offerte openen'})
+        if can_manage:
+            reservations=conn.execute("""SELECT 'order' kind,r.order_id::text id,COALESCE(o.order_number,o.reference,'Verkooporder') label,MIN(r.created_at) created_at
+                FROM inventory_reservations r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.created_at<NOW()-INTERVAL '14 days' GROUP BY r.order_id,o.order_number,o.reference
+                UNION ALL SELECT 'quote',r.quote_id::text,q.quote_number,MIN(r.created_at) FROM quote_reservations r JOIN quotes q ON q.id=r.quote_id WHERE r.stockroom_id=%s AND r.created_at<NOW()-INTERVAL '14 days' GROUP BY r.quote_id,q.quote_number""",(stockroom_id,stockroom_id)).fetchall()
+            for reservation in reservations:actions.append({'key':f"reservation:{reservation['kind']}:{reservation['id']}",'severity':'warning','title':'Reservering staat lang open','detail':f"{reservation['label']} · ouder dan 14 dagen",'targetView':'inventory','actionLabel':'Reservering bekijken'})
+    rank={'danger':0,'warning':1,'info':2}
+    actions.sort(key=lambda action:(rank.get(action['severity'],3),action['title']))
+    return actions[:100]
+
+
 def update_notification_state(session,key,action):
     key=(key or '')[:500]
     if not key:raise ValueError('Melding ontbreekt.')
@@ -127,3 +166,4 @@ def record_error(component,message,stockroom_id=None,user_id=None,details=None,l
         with server.db() as conn:
             conn.execute("INSERT INTO app_error_log(level,component,message,stockroom_id,user_id,details) VALUES(%s,%s,%s,%s,%s,%s::jsonb)",(level[:20],component[:100],str(message)[:2000],stockroom_id,user_id,json.dumps(details or {},ensure_ascii=False)));conn.commit()
     except Exception:pass
+
