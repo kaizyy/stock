@@ -43,7 +43,7 @@ class OrderInventoryTests(unittest.TestCase):
             conn.execute("INSERT INTO billing_accounts(stockroom_id) VALUES(%s)", (self.room_id,))
             conn.execute("INSERT INTO memberships(user_id,stockroom_id,role) VALUES(%s,%s,'owner')", (self.user_id, self.room_id))
             conn.commit()
-        self.session = {"user_id": str(self.user_id), "stockroom_id": str(self.room_id)}
+        self.session = {"user_id": str(self.user_id), "stockroom_id": str(self.room_id), "role": "owner"}
 
     def tearDown(self):
         with server.db() as conn:
@@ -94,6 +94,27 @@ class OrderInventoryTests(unittest.TestCase):
             order_management.update_order_status(self.session, "purchase", {"order_id": order_id, "status": "ordered"})
         state = self.get_state()
         self.assertEqual(state["items"][0]["stock"], 15)
+
+    def test_purchase_advice_groups_supplier_and_prevents_duplicate_draft(self):
+        supplier_id = order_management.save_relation(self.session, "supplier", {"name":"Supply BV", "email":"inkoop@example.test"})
+        with server.db() as conn:
+            state = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (self.room_id,)).fetchone()["state"]
+            state["items"][0]["supplier"] = "Supply BV"
+            conn.execute("UPDATE stockrooms SET state=%s::jsonb WHERE id=%s", (json.dumps(state), self.room_id))
+            conn.commit()
+        result = order_management.create_purchase_advice_drafts(self.session, {"lines_json":json.dumps([
+            {"item_id":self.item_id, "quantity":8}
+        ])})
+        self.assertEqual(len(result["created"]), 1)
+        order = order_management.order_rows(str(self.room_id), "purchase")[0]
+        self.assertEqual(order["relation_id"], supplier_id)
+        self.assertEqual(order["status"], "draft")
+        self.assertEqual(order["lines"][0]["quantity"], 8)
+        self.assertEqual(order_management.open_purchase_quantities(str(self.room_id))[self.item_id], 8)
+        with self.assertRaisesRegex(ValueError, "voldoende open"):
+            order_management.create_purchase_advice_drafts(self.session, {"lines_json":json.dumps([
+                {"item_id":self.item_id, "quantity":8}
+            ])})
 
     def test_decimal_purchase_and_sale_preserve_stock_and_reservations(self):
         purchase_id = self.create_order("purchase", 0.1)

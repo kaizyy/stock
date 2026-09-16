@@ -200,6 +200,15 @@ def order_rows(stockroom_id, order_type):
         return rows
 
 
+def open_purchase_quantities(stockroom_id):
+    with server.db() as conn:
+        rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity),0)::float8 quantity
+            FROM order_lines l JOIN orders o ON o.id=l.order_id
+            WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('draft','ordered','partial')
+            GROUP BY l.item_id""", (stockroom_id,)).fetchall()
+    return {str(row["item_id"]): float(row["quantity"] or 0) for row in rows}
+
+
 def _parse_lines(raw):
     try:
         lines = json.loads(raw or "[]")
@@ -279,6 +288,72 @@ def create_order(session, values):
         )
         conn.commit()
     return order_id
+
+
+def create_purchase_advice_drafts(session, values):
+    if not allowed(session["role"], "write_purchase"):
+        raise PermissionError("Geen rechten om inkooporders te maken.")
+    try:
+        requested = json.loads(values.get("lines_json") or "[]")
+    except json.JSONDecodeError as exc:
+        raise ValueError("Besteladvies is ongeldig.") from exc
+    if not isinstance(requested, list) or not requested:
+        raise ValueError("Selecteer minimaal één besteladvies.")
+    requested_by_id = {}
+    for row in requested[:100]:
+        try:
+            item_id, quantity = str(row.get("item_id") or "").strip(), float(row.get("quantity"))
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError("Controleer de geselecteerde aantallen.")
+        if not item_id or quantity <= 0:
+            raise ValueError("Ieder geselecteerd aantal moet groter dan nul zijn.")
+        requested_by_id[item_id] = quantity
+    created = []
+    with server.db() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("purchase-advice:" + session["stockroom_id"],))
+        room = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (session["stockroom_id"],)).fetchone()
+        state = (room or {}).get("state") or {"items": []}
+        items = {str(item.get("id")): item for item in state.get("items", []) if not item.get("archived")}
+        open_rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity),0)::float8 quantity
+            FROM order_lines l JOIN orders o ON o.id=l.order_id
+            WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('draft','ordered','partial')
+            GROUP BY l.item_id""", (session["stockroom_id"],)).fetchall()
+        open_by_id = {str(row["item_id"]): float(row["quantity"] or 0) for row in open_rows}
+        suppliers = conn.execute("SELECT id::text,name FROM suppliers WHERE stockroom_id=%s", (session["stockroom_id"],)).fetchall()
+        supplier_by_name = {row["name"].strip().casefold(): row for row in suppliers}
+        groups = {}
+        skipped = []
+        for item_id, requested_qty in requested_by_id.items():
+            item = items.get(item_id)
+            if not item:
+                skipped.append(item_id)
+                continue
+            quantity = max(0, requested_qty - open_by_id.get(item_id, 0))
+            if quantity <= 0:
+                skipped.append(item_id)
+                continue
+            supplier_name = str(item.get("supplier") or "").strip()
+            supplier = supplier_by_name.get(supplier_name.casefold()) if supplier_name else None
+            key = supplier["id"] if supplier else "name:" + (supplier_name or "Niet gekoppeld")
+            group = groups.setdefault(key, {"relation_id": supplier["id"] if supplier else None,
+                "relation_name": supplier["name"] if supplier else supplier_name or "Niet gekoppeld", "lines": []})
+            group["lines"].append((item_id, item.get("name") or "Artikel", item.get("sku") or "", quantity, float(item.get("buy") or 0)))
+        if not groups:
+            raise ValueError("Voor deze selectie staat al voldoende open op concept- of inkooporders.")
+        reference = "Besteladvies " + server.date.today().isoformat()
+        for group in groups.values():
+            order_id = str(uuid.uuid4())
+            conn.execute("""INSERT INTO orders(id,stockroom_id,order_type,relation_id,relation_name,status,reference,notes,order_date,created_by)
+                VALUES(%s,%s,'purchase',%s,%s,'draft',%s,%s,CURRENT_DATE,%s)""", (order_id, session["stockroom_id"],
+                group["relation_id"], group["relation_name"], reference, "Automatisch concept vanuit voorraadprognose; controleer aantallen en levertijd.", session["user_id"]))
+            for item_id, item_name, sku, quantity, price in group["lines"]:
+                conn.execute("INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+                             (str(uuid.uuid4()), order_id, item_id, item_name, sku, quantity, price))
+            created.append({"id": order_id, "supplier": group["relation_name"], "lines": len(group["lines"])})
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase_advice.drafts_created',%s::jsonb)",
+                     (session["stockroom_id"], session["user_id"], json.dumps({"orders": created, "skippedItems": skipped})))
+        conn.commit()
+    return {"created": created, "skipped": len(skipped)}
 
 
 def _validate_invoice_balance(conn, stockroom_id, order_id, lines):
