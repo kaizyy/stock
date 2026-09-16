@@ -69,7 +69,7 @@ def initialize():
             SELECT room.id, item.value->>'id', COALESCE(item.value->>'name',''), 0,
                    COALESCE((item.value->>'stock')::numeric,0),
                    COALESCE((item.value->>'stock')::numeric,0), 'opening_balance',
-                   'opening:' || room.id::text || ':' || item.value->>'id'
+                   'opening:' || room.id::text || ':' || (item.value->>'id')
             FROM stockrooms room
             CROSS JOIN LATERAL jsonb_array_elements(COALESCE(room.state->'items','[]'::jsonb)) item
             WHERE NOT EXISTS (
