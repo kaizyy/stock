@@ -7,6 +7,7 @@ import server
 import runner
 import dashboard_runner
 import order_management
+import purchase_receipts
 import business_tools
 import billing
 import documents_v3
@@ -25,6 +26,7 @@ class OrderInventoryTests(unittest.TestCase):
         runner.migrate_roles()
         dashboard_runner.initialize_enhancements()
         order_management.initialize_order_management()
+        purchase_receipts.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
         documents_v3.initialize()
@@ -115,6 +117,36 @@ class OrderInventoryTests(unittest.TestCase):
             order_management.create_purchase_advice_drafts(self.session, {"lines_json":json.dumps([
                 {"item_id":self.item_id, "quantity":8}
             ])})
+
+    def test_partial_purchase_receipts_update_stock_status_and_can_reverse(self):
+        order_id = self.create_order("purchase", 5, 3.5)
+        order_management.update_order_status(self.session, "purchase", {"order_id":order_id, "status":"ordered"})
+        line_id = order_management.order_rows(str(self.room_id), "purchase")[0]["lines"][0]["id"]
+        first = purchase_receipts.receive(self.session, {"order_id":order_id,"reference":"PB-1",
+            "lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        self.assertEqual(first["status"], "partial")
+        self.assertEqual(self.get_state()["items"][0]["stock"], 12)
+        second = purchase_receipts.receive(self.session, {"order_id":order_id,"reference":"PB-2",
+            "lines_json":json.dumps([{"line_id":line_id,"quantity":3}])})
+        self.assertEqual(second["status"], "received")
+        self.assertEqual(self.get_state()["items"][0]["stock"], 15)
+        self.assertEqual(len(purchase_receipts.rows(str(self.room_id),order_id)),2)
+        reversed_result=purchase_receipts.reverse(self.session,{"receipt_id":second["receiptId"]})
+        self.assertEqual(reversed_result["status"],"partial")
+        self.assertEqual(self.get_state()["items"][0]["stock"],12)
+        purchase_receipts.reverse(self.session,{"receipt_id":first["receiptId"]})
+        self.assertEqual(self.get_state()["items"][0]["stock"],10)
+        self.assertEqual(order_management.order_rows(str(self.room_id),"purchase")[0]["status"],"ordered")
+
+    def test_receipt_reversal_blocks_when_received_stock_was_used(self):
+        order_id=self.create_order("purchase",2,3.5);order_management.update_order_status(self.session,"purchase",{"order_id":order_id,"status":"ordered"})
+        line_id=order_management.order_rows(str(self.room_id),"purchase")[0]["lines"][0]["id"]
+        receipt=purchase_receipts.receive(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        with server.db() as conn:
+            state=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(self.room_id,)).fetchone()["state"];state["items"][0]["stock"]=1
+            conn.execute("UPDATE stockrooms SET state=%s::jsonb WHERE id=%s",(json.dumps(state),self.room_id));conn.commit()
+        with self.assertRaisesRegex(ValueError,"onvoldoende voorraad"):
+            purchase_receipts.reverse(self.session,{"receipt_id":receipt["receiptId"]})
 
     def test_decimal_purchase_and_sale_preserve_stock_and_reservations(self):
         purchase_id = self.create_order("purchase", 0.1)

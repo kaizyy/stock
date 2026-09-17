@@ -426,6 +426,10 @@ def update_order(session, values):
                FROM order_lines WHERE order_id=%s ORDER BY created_at,id""",
             (order_id,),
         ).fetchall()
+        if expected_type == "purchase" and conn.execute(
+            "SELECT 1 FROM purchase_receipts WHERE order_id=%s LIMIT 1", (order_id,)
+        ).fetchone():
+            raise ValueError("Deze inkooporder heeft ontvangsthistorie en kan daarom niet meer worden bewerkt.")
         room = None
         state = None
         if order["inventory_booked_at"] is not None:
@@ -569,8 +573,10 @@ def update_order_status(session, expected_type, values):
 
         already_booked = order["inventory_booked_at"] is not None
         if already_booked:
-            if expected_type == "purchase" and status != "received":
-                raise ValueError("Deze inkooporder is al in voorraad geboekt en kan niet meer naar een eerdere status.")
+            if expected_type == "purchase":
+                remaining = conn.execute("SELECT COALESCE(SUM(quantity-fulfilled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s", (order_id,)).fetchone()["remaining"]
+                if status != order["status"] or (status == "received" and remaining > 0.0005):
+                    raise ValueError("De orderstatus wordt automatisch bepaald door de geregistreerde ontvangsten.")
             if expected_type == "sales" and status not in {"completed", "paid"}:
                 raise ValueError("Deze verkooporder is al uit voorraad geboekt en kan niet meer naar een eerdere status.")
 

@@ -10,6 +10,7 @@ import dashboard_runner as dashboard
 import app_runner
 import order_management as orders
 import order_delete
+import purchase_receipts
 import warehouse_ops as warehouse
 import inventory_ledger
 import business_tools
@@ -52,7 +53,7 @@ class ExtendedHandler(app_runner.AppHandler):
         if path in ("/","/index.html"):
             session=self.require_session(api=False)
             if not session:return
-            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260829-8"></script><script src="/settings_tools.js?v=20260829-8"></script><script src="/features.js?v=20260829-8"></script><script src="/features_optional_fix.js?v=20260829-8"></script><script src="/role_dashboard.js?v=20260829-8"></script><script src="/analytics_dashboard.js?v=20260829-8"></script><script src="/inventory_intelligence.js?v=20260829-8"></script><script src="/barcode_scanner_fallback.js?v=20260829-8"></script><script src="/dynamic_navigation.js?v=20260916-2"></script><script src="/crm_orders.js?v=20260916-2"></script><script src="/order_delete_ui.js?v=20260829-8"></script><script src="/warehouse_ops.js?v=20260916-2"></script><script src="/purchase_advice.js?v=20260916-2"></script><script src="/action_center.js?v=20260916-1"></script><script src="/business_tools.js?v=20260829-8"></script><script src="/platform_admin_ui.js?v=20260829-8"></script><script src="/billing_ui.js?v=20260829-8"></script></body>');self.send_html(200,content);return
+            content=(server.PUBLIC_DIR/"index.html").read_text(encoding="utf-8");content=content.replace("</body>",'<script src="/settings.js?v=20260829-8"></script><script src="/settings_tools.js?v=20260829-8"></script><script src="/features.js?v=20260829-8"></script><script src="/features_optional_fix.js?v=20260829-8"></script><script src="/role_dashboard.js?v=20260829-8"></script><script src="/analytics_dashboard.js?v=20260829-8"></script><script src="/inventory_intelligence.js?v=20260829-8"></script><script src="/barcode_scanner_fallback.js?v=20260829-8"></script><script src="/dynamic_navigation.js?v=20260916-2"></script><script src="/crm_orders.js?v=20260917-1"></script><script src="/purchase_receipts_ui.js?v=20260917-1"></script><script src="/order_delete_ui.js?v=20260829-8"></script><script src="/warehouse_ops.js?v=20260916-2"></script><script src="/purchase_advice.js?v=20260916-2"></script><script src="/action_center.js?v=20260916-1"></script><script src="/business_tools.js?v=20260829-8"></script><script src="/platform_admin_ui.js?v=20260829-8"></script><script src="/billing_ui.js?v=20260829-8"></script></body>');self.send_html(200,content);return
         if path=="/api/account/sessions":
             s=self.require_session(api=True)
             if s:
@@ -136,6 +137,12 @@ class ExtendedHandler(app_runner.AppHandler):
             if not s:return
             if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
             self.send_json(200,{"items":orders.open_purchase_quantities(s['stockroom_id'])});return
+        if path=="/api/orders/receipts":
+            s=self.require_session(api=True)
+            if not s:return
+            if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
+            order_id=parse_qs(parsed.query).get('order_id',[''])[0].strip()
+            self.send_json(200,{"receipts":purchase_receipts.rows(s['stockroom_id'],order_id)});return
         if path=="/api/inventory/movements":
             s=self.require_session(api=True)
             if not s:return
@@ -165,7 +172,7 @@ class ExtendedHandler(app_runner.AppHandler):
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/purchase-advice/drafts","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
+        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/purchase-advice/drafts","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -207,6 +214,8 @@ class ExtendedHandler(app_runner.AppHandler):
                     ot=values.get('order_type');cap='write_purchase' if ot=='purchase' else 'write_sales'
                     if ot not in ('purchase','sales') or not orders.allowed(s['role'],cap):self.send_json(403,{"error":"Geen rechten om deze order te verwijderen."});return
                     self.send_json(200,order_delete.delete_order(s,ot,values));return
+                if path=="/api/orders/receive":self.send_json(200,purchase_receipts.receive(s,values));return
+                if path=="/api/orders/receipt/reverse":self.send_json(200,purchase_receipts.reverse(s,values));return
                 if path=="/api/purchase-advice/drafts":self.send_json(200,orders.create_purchase_advice_drafts(s,values));return
                 if path=="/api/warehouse/count":self.send_json(200,{"updated":True,**warehouse.apply_count(s,values)});return
                 if path=="/api/warehouse/count/start":self.send_json(200,warehouse.start_count(s,values));return
@@ -226,6 +235,6 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_receipts.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()
 
