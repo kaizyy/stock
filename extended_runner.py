@@ -191,7 +191,7 @@ class ExtendedHandler(app_runner.AppHandler):
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/purchase-advice/drafts","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
+        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -240,6 +240,8 @@ class ExtendedHandler(app_runner.AppHandler):
                 if path=="/api/orders/returns/cancel":self.send_json(200,order_returns.change(s,values,'cancel'));return
                 if path=="/api/orders/returns/reverse":self.send_json(200,order_returns.change(s,values,'reverse'));return
                 if path=="/api/orders/returns/credit":self.send_json(200,order_returns.create_credit(s,values));return
+                if path=="/api/orders/returns/claim":self.send_json(200,order_returns.update_claim(s,values));return
+                if path=="/api/orders/returns/refund":self.send_json(200,order_returns.record_refund(s,values));return
                 if path=="/api/purchase-advice/drafts":self.send_json(200,orders.create_purchase_advice_drafts(s,values));return
                 if path=="/api/warehouse/count":self.send_json(200,{"updated":True,**warehouse.apply_count(s,values)});return
                 if path=="/api/warehouse/count/start":self.send_json(200,warehouse.start_count(s,values));return

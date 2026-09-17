@@ -29,6 +29,12 @@
     });
   }
   const statusLabel = status => ({registered:'Aangemeld', processed:'Afgehandeld', cancelled:'Geannuleerd'}[status] || status);
+  const claimLabel = status => ({none:'Niet gestart', open:'Open', partial:'Deels ontvangen', settled:'Volledig ontvangen'}[status] || status);
+  function claimBlock(item) {
+    if (item.return_type !== 'purchase' || item.status !== 'processed') return '';
+    const remaining = Math.max(0, Number(item.expected_refund) - Number(item.received_refund));
+    return `<div class="return-claim"><strong>Leveranciersclaim · ${claimLabel(item.claim_status)}</strong><div>Verwacht ${euro.format(item.expected_refund || 0)} · ontvangen ${euro.format(item.received_refund || 0)} · open ${euro.format(remaining)}</div><form data-claim-form="${item.id}" class="return-form"><input name="claim_reference" value="${esc(item.claim_reference || '')}" placeholder="Claimreferentie leverancier"><input name="expected_refund" type="number" min="0" step="0.01" value="${Number(item.expected_refund || 0).toFixed(2)}"><button class="button ghost">Claim bijwerken</button></form>${['open','partial'].includes(item.claim_status) ? `<form data-refund-form="${item.id}" class="return-form"><input name="amount" type="number" min="0.01" max="${remaining.toFixed(2)}" step="0.01" placeholder="Ontvangen bedrag"><input name="note" placeholder="Betaalreferentie / notitie"><button class="button primary">Terugbetaling boeken</button></form>` : ''}</div>`;
+  }
   async function render() {
     const root = document.getElementById('returnContent');
     root.innerHTML = '<p>Retourgegevens laden…</p>';
@@ -36,12 +42,18 @@
       const data = await api(`/api/orders/returns?order_id=${encodeURIComponent(currentOrder)}`);
       const available = data.lines.filter(line => Number(line.available_quantity) > 0);
       const form = available.length ? `<form class="return-form" id="returnForm"><input name="reference" placeholder="Retourreferentie (optioneel)"><textarea name="reason" placeholder="Reden van retour" rows="2"></textarea><div class="return-grid">${available.map(line => `<label>${esc(line.item_name)}<span class="return-muted">Geleverd ${Number(line.fulfilled_quantity)}, nog mogelijk ${Number(line.available_quantity)}</span></label><input type="number" min="0" max="${Number(line.available_quantity)}" step="0.001" value="0" data-return-line="${esc(line.id)}">`).join('')}</div><button class="button primary">Retour aanmelden</button></form>` : '<p class="return-muted">Er zijn geen geleverde aantallen meer beschikbaar voor een nieuwe retour.</p>';
-      const history = data.returns.map(item => `<article class="return-card"><strong>${esc(item.rma_number || 'Retour')} · ${statusLabel(item.status)}</strong><span class="return-muted">${new Date(item.created_at).toLocaleDateString('nl-NL')}</span><div>${item.lines.map(line => `${Number(line.quantity)}× ${esc(line.item_name)}`).join(' · ')}</div>${item.reference ? `<span class="return-muted">${esc(item.reference)}</span>` : ''}${item.reason ? `<div>${esc(item.reason)}</div>` : ''}${item.return_type === 'sales' && Number(item.credit_amount) > 0 ? `<div>Creditvoorstel: ${euro.format(item.credit_amount)}</div>` : ''}<div class="return-actions"><a class="button ghost" target="_blank" href="/api/documents/return.pdf?id=${encodeURIComponent(item.id)}">Retourlabel</a>${item.status === 'registered' ? `<button type="button" class="button primary" data-return-action="process" data-id="${item.id}">Verwerken</button><button type="button" class="button ghost" data-return-action="cancel" data-id="${item.id}">Annuleren</button>` : ''}${item.status === 'processed' && !item.credit_note_id ? `<button type="button" class="button ghost" data-return-action="reverse" data-id="${item.id}">Terugdraaien</button>${item.return_type === 'sales' ? `<button type="button" class="button primary" data-return-action="credit" data-id="${item.id}">Creditnota maken</button>` : ''}` : ''}${item.credit_note_id ? '<span class="return-muted">Creditnota aangemaakt</span>' : ''}</div></article>`).join('');
+      const history = data.returns.map(item => `<article class="return-card"><strong>${esc(item.rma_number || 'Retour')} · ${statusLabel(item.status)}</strong><span class="return-muted">${new Date(item.created_at).toLocaleDateString('nl-NL')}</span><div>${item.lines.map(line => `${Number(line.quantity)}× ${esc(line.item_name)}`).join(' · ')}</div>${item.reference ? `<span class="return-muted">${esc(item.reference)}</span>` : ''}${item.reason ? `<div>${esc(item.reason)}</div>` : ''}${item.return_type === 'sales' && Number(item.credit_amount) > 0 ? `<div>Creditvoorstel: ${euro.format(item.credit_amount)}</div>` : ''}${claimBlock(item)}<div class="return-actions"><a class="button ghost" target="_blank" href="/api/documents/return.pdf?id=${encodeURIComponent(item.id)}">Retourlabel</a>${item.status === 'registered' ? `<button type="button" class="button primary" data-return-action="process" data-id="${item.id}">Verwerken</button><button type="button" class="button ghost" data-return-action="cancel" data-id="${item.id}">Annuleren</button>` : ''}${item.status === 'processed' && !item.credit_note_id ? `<button type="button" class="button ghost" data-return-action="reverse" data-id="${item.id}">Terugdraaien</button>${item.return_type === 'sales' ? `<button type="button" class="button primary" data-return-action="credit" data-id="${item.id}">Creditnota maken</button>` : ''}` : ''}${item.credit_note_id ? '<span class="return-muted">Creditnota aangemaakt</span>' : ''}</div></article>`).join('');
       root.innerHTML = form + history;
     } catch (error) { root.innerHTML = `<p class="crm-msg err">${esc(error.message)}</p>`; }
   }
   async function open(orderId) { ensureUI(); currentOrder = orderId; document.getElementById('returnDialog').showModal(); await render(); }
   document.addEventListener('submit', async event => {
+    const claimId=event.target.dataset.claimForm,refundId=event.target.dataset.refundForm;
+    if (claimId || refundId) {
+      event.preventDefault();const body=new FormData(event.target);body.set('return_id',claimId||refundId);
+      try { await api(`/api/orders/returns/${claimId?'claim':'refund'}`,{method:'POST',body});await render();document.dispatchEvent(new CustomEvent('stockroom:refresh',{detail:{view:'overview'}})); } catch(error) { alert(error.message); }
+      return;
+    }
     if (event.target.id !== 'returnForm') return;
     event.preventDefault();
     const body = new FormData(event.target);

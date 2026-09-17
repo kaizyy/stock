@@ -175,10 +175,18 @@ class OrderInventoryTests(unittest.TestCase):
         result=order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
         order_returns.process(self.session,{"return_id":result["id"]})
         self.assertEqual(self.get_state()["items"][0]["stock"],11)
+        details=order_returns.overview(str(self.room_id),order_id)["returns"][0]
+        self.assertEqual(details["claim_status"],"open");self.assertEqual(details["expected_refund"],7)
+        order_returns.update_claim(self.session,{"return_id":result["id"],"claim_reference":"CLAIM-42","expected_refund":"7.00"})
+        partial=order_returns.record_refund(self.session,{"return_id":result["id"],"amount":"2.00","note":"deelbetaling"})
+        self.assertEqual(partial["claimStatus"],"partial")
+        settled=order_returns.record_refund(self.session,{"return_id":result["id"],"amount":"5.00","note":"slotbetaling"})
+        self.assertEqual(settled["claimStatus"],"settled")
         with self.assertRaisesRegex(ValueError,"hoger dan geleverd"):
             order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
-        order_returns.change(self.session,{"return_id":result["id"]},"reverse")
-        self.assertEqual(self.get_state()["items"][0]["stock"],13)
+        with self.assertRaisesRegex(ValueError,"terugbetaling"):
+            order_returns.change(self.session,{"return_id":result["id"]},"reverse")
+        self.assertEqual(self.get_state()["items"][0]["stock"],11)
 
     def test_decimal_purchase_and_sale_preserve_stock_and_reservations(self):
         purchase_id = self.create_order("purchase", 0.1)

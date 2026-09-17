@@ -27,6 +27,12 @@ def initialize():
             order_line_id UUID NOT NULL REFERENCES order_lines(id) ON DELETE RESTRICT,item_id TEXT NOT NULL,item_name TEXT NOT NULL,
             quantity NUMERIC(14,3) NOT NULL CHECK(quantity>0),unit_price NUMERIC(14,4) NOT NULL CHECK(unit_price>=0))""")
         conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS rma_number TEXT")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS expected_refund NUMERIC(14,2) NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS received_refund NUMERIC(14,2) NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS claim_status TEXT NOT NULL DEFAULT 'none'")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS claim_reference TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_order_returns_rma ON order_returns(stockroom_id,rma_number) WHERE rma_number IS NOT NULL")
         conn.execute("""CREATE TABLE IF NOT EXISTS return_sequences(
             stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,year INTEGER NOT NULL,
@@ -49,7 +55,8 @@ def overview(stockroom_id, order_id):
         if not order:raise PermissionError('Order niet gevonden.')
         lines=_lines(conn,order_id)
         for line in lines:line['available_quantity']=max(0,float(line['fulfilled_quantity'])-float(line['returned_quantity']))
-        returns=conn.execute("""SELECT r.id::text,r.rma_number,r.return_type,r.status,r.reference,r.reason,r.credit_amount::float8,r.credit_note_id::text,r.created_at,r.processed_at,
+        returns=conn.execute("""SELECT r.id::text,r.rma_number,r.return_type,r.status,r.reference,r.reason,r.credit_amount::float8,r.credit_note_id::text,
+                   r.expected_refund::float8,r.received_refund::float8,r.claim_status,r.claim_reference,r.claimed_at,r.settled_at,r.created_at,r.processed_at,
                    u.name created_by_name,p.name processed_by_name
             FROM order_returns r LEFT JOIN users u ON u.id=r.created_by LEFT JOIN users p ON p.id=r.processed_by
             WHERE r.stockroom_id=%s AND r.order_id=%s ORDER BY r.created_at DESC""",(stockroom_id,order_id)).fetchall()
@@ -96,10 +103,11 @@ def create(session, values):
             selected.append((line,quantity))
         return_id=str(uuid.uuid4());rma_number=_next_rma(conn,session['stockroom_id']);subtotal=sum(quantity*float(line['unit_price']) for line,quantity in selected)
         vat=conn.execute("SELECT vat_percent::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL",(order_id,session['stockroom_id'])).fetchone();credit=round(subtotal*(1+float((vat or {}).get('vat_percent') or 0)/100),2) if order['order_type']=='sales' else 0
-        conn.execute("INSERT INTO order_returns(id,stockroom_id,order_id,rma_number,return_type,status,reference,reason,credit_amount,created_by) VALUES(%s,%s,%s,%s,%s,'registered',%s,%s,%s,%s)",(return_id,session['stockroom_id'],order_id,rma_number,order['order_type'],reference,reason,credit,session['user_id']))
+        expected_refund=round(subtotal,2) if order['order_type']=='purchase' else 0
+        conn.execute("INSERT INTO order_returns(id,stockroom_id,order_id,rma_number,return_type,status,reference,reason,credit_amount,expected_refund,created_by) VALUES(%s,%s,%s,%s,%s,'registered',%s,%s,%s,%s,%s)",(return_id,session['stockroom_id'],order_id,rma_number,order['order_type'],reference,reason,credit,expected_refund,session['user_id']))
         for line,quantity in selected:conn.execute("INSERT INTO order_return_lines(id,return_id,order_line_id,item_id,item_name,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",(str(uuid.uuid4()),return_id,line['id'],line['item_id'],line['item_name'],quantity,line['unit_price']))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.registered',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'orderId':order_id,'type':order['order_type'],'creditSuggestion':credit})));conn.commit()
-    return {'id':return_id,'rmaNumber':rma_number,'creditAmount':credit}
+    return {'id':return_id,'rmaNumber':rma_number,'creditAmount':credit,'expectedRefund':expected_refund}
 
 
 def label_pdf(session, return_id):
@@ -145,7 +153,9 @@ def process(session, values):
             item['stock']=stock+quantity if result['return_type']=='sales' else stock-quantity
             state.setdefault('transactions',[]).append({'id':str(uuid.uuid4()),'type':'outgoing' if result['return_type']=='sales' else 'incoming','itemId':str(line['item_id']),'qty':-quantity,'price':float(line['unit_price']),'party':result['relation_name'] or 'Retour','done':True,'paid':False,'date':server.datetime.now().isoformat(timespec='seconds'),'orderId':str(result['order_id']),'returnId':return_id,'isReturn':True,'reference':result['reference']})
         inventory_ledger.set_context(conn,'linked_sales_return' if result['return_type']=='sales' else 'linked_purchase_return',result['reference'] or return_id)
-        conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",(json.dumps(state,ensure_ascii=False),session['stockroom_id']));conn.execute("UPDATE order_returns SET status='processed',processed_by=%s,processed_at=NOW(),updated_at=NOW() WHERE id=%s",(session['user_id'],return_id));conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.processed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'orderId':str(result['order_id']),'type':result['return_type']})));conn.commit()
+        conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",(json.dumps(state,ensure_ascii=False),session['stockroom_id']))
+        claim_sql=",claim_status='open',claimed_at=NOW()" if result['return_type']=='purchase' else ''
+        conn.execute(f"UPDATE order_returns SET status='processed',processed_by=%s,processed_at=NOW(),updated_at=NOW(){claim_sql} WHERE id=%s",(session['user_id'],return_id));conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.processed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'orderId':str(result['order_id']),'type':result['return_type']})));conn.commit()
     return {'processed':True,'creditAmount':float(result['credit_amount'])}
 
 
@@ -161,12 +171,13 @@ def change(session, values, action):
         else:
             if result['status']!='processed':raise ValueError('Alleen een verwerkte retour kan worden teruggedraaid.')
             if result['credit_note_id']:raise ValueError('Draai eerst de gekoppelde creditnota terug.')
+            if result['return_type']=='purchase' and float(result['received_refund'] or 0)>0:raise ValueError('De retour kan niet terug zolang er een terugbetaling op de leveranciersclaim staat.')
             lines=conn.execute("SELECT * FROM order_return_lines WHERE return_id=%s",(return_id,)).fetchall();room=conn.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE",(session['stockroom_id'],)).fetchone();state=room['state']
             for line in lines:
                 item=next((item for item in state.get('items',[]) if str(item.get('id'))==str(line['item_id'])),None);quantity=float(line['quantity']);stock=float((item or {}).get('stock') or 0)
                 if not item or (result['return_type']=='sales' and stock+0.0005<quantity):raise ValueError(f"Retour kan niet terug: onvoldoende voorraad van {line['item_name']}.")
                 item['stock']=stock-quantity if result['return_type']=='sales' else stock+quantity
-            state['transactions']=[tx for tx in state.get('transactions',[]) if str(tx.get('returnId') or '')!=return_id];inventory_ledger.set_context(conn,'linked_return_reversed',result['reference'] or return_id);conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",(json.dumps(state,ensure_ascii=False),session['stockroom_id']));conn.execute("UPDATE order_returns SET status='registered',processed_by=NULL,processed_at=NULL,updated_at=NOW() WHERE id=%s",(return_id,));event='return.reversed'
+            state['transactions']=[tx for tx in state.get('transactions',[]) if str(tx.get('returnId') or '')!=return_id];inventory_ledger.set_context(conn,'linked_return_reversed',result['reference'] or return_id);conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",(json.dumps(state,ensure_ascii=False),session['stockroom_id']));conn.execute("UPDATE order_returns SET status='registered',processed_by=NULL,processed_at=NULL,claim_status='none',claimed_at=NULL,settled_at=NULL,updated_at=NOW() WHERE id=%s",(return_id,));event='return.reversed'
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",(session['stockroom_id'],session['user_id'],event,json.dumps({'returnId':return_id,'orderId':str(result['order_id'])})));conn.commit()
     return {'updated':True}
 
@@ -180,3 +191,36 @@ def create_credit(session, values):
     credit=financial_workflow.create_credit(session,str(result['order_id']),float(result['credit_amount']),f"Retour {return_id}: {result['reason']}")
     with server.db() as conn:conn.execute("UPDATE order_returns SET credit_note_id=%s,updated_at=NOW() WHERE id=%s AND credit_note_id IS NULL",(credit['id'],return_id));conn.commit()
     return credit
+
+
+def update_claim(session, values):
+    return_id=(values.get('return_id') or '').strip();reference=(values.get('claim_reference') or '').strip()[:120]
+    try:expected=round(float(values.get('expected_refund') or 0),2)
+    except (TypeError,ValueError):raise ValueError('Controleer het verwachte terugbetalingsbedrag.')
+    if expected<0:raise ValueError('Het verwachte bedrag kan niet negatief zijn.')
+    with server.db() as conn:
+        result=conn.execute("SELECT id,return_type,status,received_refund::float8 FROM order_returns WHERE id=%s AND stockroom_id=%s FOR UPDATE",(return_id,session['stockroom_id'])).fetchone()
+        if not result or result['return_type']!='purchase' or result['status']!='processed':raise ValueError('Alleen een verwerkte inkoopretour heeft een leveranciersclaim.')
+        _require_access(session,'purchase')
+        if expected+0.005<float(result['received_refund']):raise ValueError('Het verwachte bedrag is lager dan wat al ontvangen is.')
+        status='settled' if expected<=float(result['received_refund'])+0.005 else ('partial' if float(result['received_refund'])>0 else 'open')
+        conn.execute("UPDATE order_returns SET expected_refund=%s,claim_reference=%s,claim_status=%s,settled_at=CASE WHEN %s='settled' THEN NOW() ELSE NULL END,updated_at=NOW() WHERE id=%s",(expected,reference,status,status,return_id))
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.claim_updated',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'expectedRefund':expected,'reference':reference,'status':status})));conn.commit()
+    return {'updated':True,'claimStatus':status}
+
+
+def record_refund(session, values):
+    return_id=(values.get('return_id') or '').strip();note=(values.get('note') or '').strip()[:500]
+    try:amount=round(float(values.get('amount') or 0),2)
+    except (TypeError,ValueError):raise ValueError('Controleer het ontvangen bedrag.')
+    if amount<=0:raise ValueError('Vul een ontvangen bedrag groter dan nul in.')
+    with server.db() as conn:
+        result=conn.execute("SELECT id,return_type,status,claim_status,expected_refund::float8,received_refund::float8 FROM order_returns WHERE id=%s AND stockroom_id=%s FOR UPDATE",(return_id,session['stockroom_id'])).fetchone()
+        if not result or result['return_type']!='purchase' or result['status']!='processed' or result['claim_status'] not in ('open','partial'):raise ValueError('Deze leveranciersclaim staat niet open.')
+        _require_access(session,'purchase')
+        total=round(float(result['received_refund'])+amount,2);expected=float(result['expected_refund'])
+        if total>expected+0.005:raise ValueError('De terugbetaling is hoger dan het verwachte claimbedrag.')
+        status='settled' if total>=expected-0.005 else 'partial'
+        conn.execute("UPDATE order_returns SET received_refund=%s,claim_status=%s,settled_at=CASE WHEN %s='settled' THEN NOW() ELSE NULL END,updated_at=NOW() WHERE id=%s",(total,status,status,return_id))
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.refund_received',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'amount':amount,'totalReceived':total,'note':note,'status':status})));conn.commit()
+    return {'receivedRefund':total,'claimStatus':status}

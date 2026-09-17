@@ -98,6 +98,8 @@ def stockroom_notifications(stockroom_id,user_id=None):
         if returns_ready:
             open_returns=conn.execute("SELECT r.id::text,r.rma_number,r.return_type,o.relation_name FROM order_returns r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.status='registered' ORDER BY r.created_at",(stockroom_id,)).fetchall()
             for result in open_returns:notifications.append({'type':'return','severity':'warning','title':f"Retour {result['rma_number'] or ''} verwerken",'detail':result['relation_name'] or 'Geen relatie','targetView':'orders','targetType':'return','targetId':result['id'],'returnType':result['return_type']})
+            claims=conn.execute("SELECT r.id::text,r.rma_number,r.expected_refund::float8,r.received_refund::float8,o.relation_name FROM order_returns r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.claim_status IN ('open','partial') ORDER BY r.claimed_at",(stockroom_id,)).fetchall()
+            for claim in claims:notifications.append({'type':'supplier_claim','severity':'warning','title':f"Leveranciersclaim {claim['rma_number'] or ''} staat open",'detail':f"{claim['relation_name'] or 'Geen leverancier'} · nog € {float(claim['expected_refund'])-float(claim['received_refund']):.2f} te ontvangen",'targetView':'orders','targetType':'return','targetId':claim['id']})
         errors=conn.execute("SELECT component,message,created_at FROM app_error_log WHERE stockroom_id=%s AND created_at>NOW()-INTERVAL '7 days' ORDER BY created_at DESC LIMIT 20",(stockroom_id,)).fetchall()
         for error in errors:notifications.append({'type':'system','severity':'danger','title':f"Systeemmelding: {error['component']}",'detail':error['message'][:250],'createdAt':error['created_at']})
         states={}
@@ -132,6 +134,10 @@ def action_center(stockroom_id, role):
             for result in open_returns:
                 if (result['return_type']=='purchase' and not can_purchase) or (result['return_type']=='sales' and not can_sales):continue
                 actions.append({'key':f"return:{result['id']}",'severity':'warning','title':f"Retour {result['rma_number'] or ''} wacht op verwerking",'detail':f"{result['relation_name'] or 'Geen relatie'} · aangemeld {result['created_at'].strftime('%d-%m-%Y')}",'targetView':'orders','actionLabel':'Retour bekijken'})
+            if can_purchase:
+                claims=conn.execute("""SELECT r.id::text,r.rma_number,r.expected_refund::float8,r.received_refund::float8,o.relation_name
+                    FROM order_returns r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.claim_status IN ('open','partial') ORDER BY r.claimed_at""",(stockroom_id,)).fetchall()
+                for claim in claims:actions.append({'key':f"supplier-claim:{claim['id']}",'severity':'warning','title':f"Leveranciersclaim {claim['rma_number'] or ''} staat open",'detail':f"{claim['relation_name'] or 'Geen leverancier'} · nog € {float(claim['expected_refund'])-float(claim['received_refund']):.2f} te ontvangen",'targetView':'orders','actionLabel':'Claim bekijken'})
         if role in ('owner','admin'):
             counts=conn.execute("SELECT id::text,title,submitted_at FROM inventory_counts WHERE stockroom_id=%s AND status='submitted' ORDER BY submitted_at",(stockroom_id,)).fetchall()
             for count in counts:actions.append({'key':f"count:{count['id']}",'severity':'warning','title':'Voorraadtelling wacht op goedkeuring','detail':count['title'],'targetView':'warehouse','actionLabel':'Telling beoordelen'})
