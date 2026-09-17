@@ -154,13 +154,16 @@ class OrderInventoryTests(unittest.TestCase):
         order_id=self.create_order("sales",3,10)
         order_management.update_order_status(self.session,"sales",{"order_id":order_id,"status":"completed"})
         line_id=order_management.order_rows(str(self.room_id),"sales")[0]["lines"][0]["id"]
-        result=order_returns.create(self.session,{"order_id":order_id,"reason":"Klantretour","lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        result=order_returns.create(self.session,{"order_id":order_id,"reason_code":"defective","reason":"Klantretour","lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
         self.assertRegex(result["rmaNumber"],r"^RMA-\d{4}-\d{6}$")
         label,filename=order_returns.label_pdf(self.session,result["id"])
         self.assertTrue(label.startswith(b"%PDF"));self.assertTrue(filename.startswith("RMA-"))
         self.assertEqual(self.get_state()["items"][0]["stock"],7)
         order_returns.process(self.session,{"return_id":result["id"]})
         self.assertEqual(self.get_state()["items"][0]["stock"],9)
+        report=order_returns.analytics(str(self.room_id))
+        self.assertEqual(report["summary"]["return_count"],1);self.assertEqual(report["reasons"][0]["label"],"defective")
+        self.assertEqual(report["items"][0]["quantity"],2)
         with self.assertRaisesRegex(ValueError,"hoger dan geleverd"):
             order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
         order_returns.change(self.session,{"return_id":result["id"]},"reverse")

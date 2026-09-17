@@ -162,6 +162,11 @@ class ExtendedHandler(app_runner.AppHandler):
                 self.send_json(200,data)
             except PermissionError as e:self.send_json(404,{"error":str(e)})
             return
+        if path=="/api/returns/analytics":
+            s=self.require_session(api=True)
+            if not s:return
+            if not (orders.allowed(s['role'],'read_purchase') or orders.allowed(s['role'],'read_sales')):self.send_json(403,{"error":"Geen rechten."});return
+            self.send_json(200,order_returns.analytics(s['stockroom_id']));return
         if path=="/api/inventory/movements":
             s=self.require_session(api=True)
             if not s:return

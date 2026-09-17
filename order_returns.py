@@ -33,6 +33,7 @@ def initialize():
         conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS claim_reference TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ")
         conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS reason_code TEXT NOT NULL DEFAULT 'other'")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_order_returns_rma ON order_returns(stockroom_id,rma_number) WHERE rma_number IS NOT NULL")
         conn.execute("""CREATE TABLE IF NOT EXISTS return_sequences(
             stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,year INTEGER NOT NULL,
@@ -55,7 +56,7 @@ def overview(stockroom_id, order_id):
         if not order:raise PermissionError('Order niet gevonden.')
         lines=_lines(conn,order_id)
         for line in lines:line['available_quantity']=max(0,float(line['fulfilled_quantity'])-float(line['returned_quantity']))
-        returns=conn.execute("""SELECT r.id::text,r.rma_number,r.return_type,r.status,r.reference,r.reason,r.credit_amount::float8,r.credit_note_id::text,
+        returns=conn.execute("""SELECT r.id::text,r.rma_number,r.return_type,r.status,r.reference,r.reason,r.reason_code,r.credit_amount::float8,r.credit_note_id::text,
                    r.expected_refund::float8,r.received_refund::float8,r.claim_status,r.claim_reference,r.claimed_at,r.settled_at,r.created_at,r.processed_at,
                    u.name created_by_name,p.name processed_by_name
             FROM order_returns r LEFT JOIN users u ON u.id=r.created_by LEFT JOIN users p ON p.id=r.processed_by
@@ -92,6 +93,8 @@ def _next_rma(conn, stockroom_id):
 
 def create(session, values):
     order_id=(values.get('order_id') or '').strip();requested=_parse(values.get('lines_json'));reference=(values.get('reference') or '').strip()[:120];reason=(values.get('reason') or '').strip()[:1000]
+    reason_code=(values.get('reason_code') or 'other').strip();allowed_reasons={'damaged','wrong_item','defective','not_suitable','delivery_issue','customer_changed_mind','supplier_error','other'}
+    if reason_code not in allowed_reasons:raise ValueError('Kies een geldige retourreden.')
     with server.db() as conn:
         order=conn.execute("SELECT id,order_type,status FROM orders WHERE id=%s AND stockroom_id=%s FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
         if not order:raise PermissionError('Order niet gevonden.')
@@ -104,7 +107,7 @@ def create(session, values):
         return_id=str(uuid.uuid4());rma_number=_next_rma(conn,session['stockroom_id']);subtotal=sum(quantity*float(line['unit_price']) for line,quantity in selected)
         vat=conn.execute("SELECT vat_percent::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL",(order_id,session['stockroom_id'])).fetchone();credit=round(subtotal*(1+float((vat or {}).get('vat_percent') or 0)/100),2) if order['order_type']=='sales' else 0
         expected_refund=round(subtotal,2) if order['order_type']=='purchase' else 0
-        conn.execute("INSERT INTO order_returns(id,stockroom_id,order_id,rma_number,return_type,status,reference,reason,credit_amount,expected_refund,created_by) VALUES(%s,%s,%s,%s,%s,'registered',%s,%s,%s,%s,%s)",(return_id,session['stockroom_id'],order_id,rma_number,order['order_type'],reference,reason,credit,expected_refund,session['user_id']))
+        conn.execute("INSERT INTO order_returns(id,stockroom_id,order_id,rma_number,return_type,status,reference,reason,reason_code,credit_amount,expected_refund,created_by) VALUES(%s,%s,%s,%s,%s,'registered',%s,%s,%s,%s,%s,%s)",(return_id,session['stockroom_id'],order_id,rma_number,order['order_type'],reference,reason,reason_code,credit,expected_refund,session['user_id']))
         for line,quantity in selected:conn.execute("INSERT INTO order_return_lines(id,return_id,order_line_id,item_id,item_name,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",(str(uuid.uuid4()),return_id,line['id'],line['item_id'],line['item_name'],quantity,line['unit_price']))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.registered',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'orderId':order_id,'type':order['order_type'],'creditSuggestion':credit})));conn.commit()
     return {'id':return_id,'rmaNumber':rma_number,'creditAmount':credit,'expectedRefund':expected_refund}
@@ -224,3 +227,24 @@ def record_refund(session, values):
         conn.execute("UPDATE order_returns SET received_refund=%s,claim_status=%s,settled_at=CASE WHEN %s='settled' THEN NOW() ELSE NULL END,updated_at=NOW() WHERE id=%s",(total,status,status,return_id))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.refund_received',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'amount':amount,'totalReceived':total,'note':note,'status':status})));conn.commit()
     return {'receivedRefund':total,'claimStatus':status}
+
+
+def analytics(stockroom_id):
+    with server.db() as conn:
+        summary=conn.execute("""SELECT COUNT(*)::int return_count,
+            COALESCE(SUM(CASE WHEN return_type='sales' THEN credit_amount ELSE 0 END),0)::float8 sales_credit,
+            COALESCE(SUM(CASE WHEN return_type='purchase' THEN expected_refund ELSE 0 END),0)::float8 supplier_claims,
+            COALESCE(SUM(CASE WHEN return_type='purchase' THEN received_refund ELSE 0 END),0)::float8 refunds_received,
+            COUNT(*) FILTER(WHERE status='registered')::int awaiting_processing
+            FROM order_returns WHERE stockroom_id=%s AND status<>'cancelled'""",(stockroom_id,)).fetchone()
+        reasons=conn.execute("""SELECT reason_code label,COUNT(*)::int count FROM order_returns
+            WHERE stockroom_id=%s AND status<>'cancelled' GROUP BY reason_code ORDER BY count DESC,label LIMIT 8""",(stockroom_id,)).fetchall()
+        items=conn.execute("""SELECT rl.item_name label,SUM(rl.quantity)::float8 quantity,COUNT(DISTINCT r.id)::int returns
+            FROM order_returns r JOIN order_return_lines rl ON rl.return_id=r.id
+            WHERE r.stockroom_id=%s AND r.status<>'cancelled' GROUP BY rl.item_name ORDER BY quantity DESC,label LIMIT 8""",(stockroom_id,)).fetchall()
+        suppliers=conn.execute("""SELECT COALESCE(o.relation_name,'Geen leverancier') label,COUNT(*)::int returns,
+            COALESCE(SUM(r.expected_refund),0)::float8 amount
+            FROM order_returns r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.return_type='purchase' AND r.status<>'cancelled'
+            GROUP BY o.relation_name ORDER BY returns DESC,label LIMIT 8""",(stockroom_id,)).fetchall()
+    summary['claims_open']=max(0,float(summary['supplier_claims'])-float(summary['refunds_received']))
+    return {'summary':summary,'reasons':reasons,'items':items,'suppliers':suppliers}
