@@ -82,4 +82,4 @@
   document.getElementById('orderDialog').addEventListener('cancel',e=>{e.preventDefault();closeOrder()});
   refresh();
 })();
-
+import('/return_management.js?v=20260917-1').catch(() => {});

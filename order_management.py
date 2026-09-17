@@ -430,6 +430,8 @@ def update_order(session, values):
             "SELECT 1 FROM purchase_receipts WHERE order_id=%s LIMIT 1", (order_id,)
         ).fetchone():
             raise ValueError("Deze inkooporder heeft ontvangsthistorie en kan daarom niet meer worden bewerkt.")
+        if conn.execute("SELECT 1 FROM order_returns WHERE order_id=%s LIMIT 1", (order_id,)).fetchone():
+            raise ValueError("Deze order heeft retourhistorie en kan daarom niet meer worden bewerkt.")
         room = None
         state = None
         if order["inventory_booked_at"] is not None:
@@ -621,4 +623,3 @@ def update_order_status(session, expected_type, values):
         )
         conn.commit()
     return expected_type
-

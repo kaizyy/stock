@@ -66,6 +66,8 @@ def check_web_feature_parity() -> None:
     require(read("order_management.py"), ["create_purchase_advice_drafts", "pg_advisory_xact_lock", "purchase_advice.drafts_created", "fulfilled_quantity"], "Dubbelbestelling-beveiliging")
     require(read("purchase_receipts.py"), ["purchase_receipts", "fulfilled_quantity", "purchase_order_receipt", "purchase_receipt_reversed", "def reverse"], "Gedeeltelijke inkoopontvangsten")
     require(read("purchase_receipts_ui.js"), ["receiptDialog", "data-receipt-line", "/api/orders/receive", "data-reverse-receipt", "scanReceiptBtn", "stockroom:barcode", "Te veel gescand"], "Ontvangst- en barcodebediening")
+    require(read("order_returns.py"), ["order_returns", "order_return_lines", "fulfilled_quantity", "def process", "def create_credit"], "Gekoppelde orderretouren")
+    require(read("return_management.js"), ["returnDialog", "/api/orders/returns", "data-return-action", "Creditnota maken"], "Retourbediening")
     require(read("barcode_scanner_fallback.js"), ["scanTarget==='receipt'", "stockroom:barcode", "restartTimer", "scanReceiptBtn"], "Doorlopende camera-ontvangstscanner")
     require(index, ['id="movementPanel"', 'id="movementEntries"', 'id="movementReservations"', 'id="movementLedger"', 'id="downloadMovements"', 'inventory_movements.js?v=', 'id="reconciliationTable"', 'inventory_reconciliation_ui.js?v='], "Voorraadmutaties en verschillenrapport")
     require(index, ['class="table-card inventory-table-card" tabindex="0"'], "Toegankelijke voorraadtabel")
@@ -87,7 +89,7 @@ def check_web_feature_parity() -> None:
     require(read("platform_admin.py"), ["def action_center", "inventory_counts", "late-delivery", "quote-followup", "reservation:"], "Actiebronnen en rolfiltering")
     require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations', 'parse_stock_delta', 'decimal_json_number'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
-    require(dockerfile, ["action_center.js", "inventory_forecast.js", "purchase_advice.js", "purchase_receipts.py", "purchase_receipts_ui.js", "inventory_movements.js", "inventory_reconciliation_ui.js", "inventory_ledger.py", "/app/public/"], "Productie-assets voorraad")
+    require(dockerfile, ["action_center.js", "inventory_forecast.js", "purchase_advice.js", "purchase_receipts.py", "purchase_receipts_ui.js", "order_returns.py", "return_management.js", "inventory_movements.js", "inventory_reconciliation_ui.js", "inventory_ledger.py", "/app/public/"], "Productie-assets voorraad")
 
 
 def check_android_shell() -> None:
@@ -119,4 +121,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -8,6 +8,7 @@ import runner
 import dashboard_runner
 import order_management
 import purchase_receipts
+import order_returns
 import business_tools
 import billing
 import documents_v3
@@ -27,6 +28,7 @@ class OrderInventoryTests(unittest.TestCase):
         dashboard_runner.initialize_enhancements()
         order_management.initialize_order_management()
         purchase_receipts.initialize()
+        order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
         documents_v3.initialize()
@@ -148,6 +150,33 @@ class OrderInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"onvoldoende voorraad"):
             purchase_receipts.reverse(self.session,{"receipt_id":receipt["receiptId"]})
 
+    def test_sales_return_is_bounded_processed_and_reversible(self):
+        order_id=self.create_order("sales",3,10)
+        order_management.update_order_status(self.session,"sales",{"order_id":order_id,"status":"completed"})
+        line_id=order_management.order_rows(str(self.room_id),"sales")[0]["lines"][0]["id"]
+        result=order_returns.create(self.session,{"order_id":order_id,"reason":"Klantretour","lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        self.assertEqual(self.get_state()["items"][0]["stock"],7)
+        order_returns.process(self.session,{"return_id":result["id"]})
+        self.assertEqual(self.get_state()["items"][0]["stock"],9)
+        with self.assertRaisesRegex(ValueError,"hoger dan geleverd"):
+            order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        order_returns.change(self.session,{"return_id":result["id"]},"reverse")
+        self.assertEqual(self.get_state()["items"][0]["stock"],7)
+        order_returns.change(self.session,{"return_id":result["id"]},"cancel")
+
+    def test_purchase_return_uses_only_received_quantity(self):
+        order_id=self.create_order("purchase",5,3.5)
+        order_management.update_order_status(self.session,"purchase",{"order_id":order_id,"status":"ordered"})
+        line_id=order_management.order_rows(str(self.room_id),"purchase")[0]["lines"][0]["id"]
+        purchase_receipts.receive(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":3}])})
+        result=order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        order_returns.process(self.session,{"return_id":result["id"]})
+        self.assertEqual(self.get_state()["items"][0]["stock"],11)
+        with self.assertRaisesRegex(ValueError,"hoger dan geleverd"):
+            order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        order_returns.change(self.session,{"return_id":result["id"]},"reverse")
+        self.assertEqual(self.get_state()["items"][0]["stock"],13)
+
     def test_decimal_purchase_and_sale_preserve_stock_and_reservations(self):
         purchase_id = self.create_order("purchase", 0.1)
         order_management.update_order_status(self.session, "purchase", {"order_id": purchase_id, "status": "received"})
@@ -191,4 +220,3 @@ class OrderInventoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

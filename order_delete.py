@@ -23,6 +23,10 @@ def delete_order(session, expected_type, values):
             raise PermissionError("Order niet gevonden.")
         if order["order_type"] != expected_type:
             raise PermissionError("Geen rechten voor dit ordertype.")
+        if conn.execute("SELECT 1 FROM purchase_receipts WHERE order_id=%s LIMIT 1", (order_id,)).fetchone():
+            raise ValueError("Deze order heeft ontvangsthistorie en kan niet worden verwijderd.")
+        if conn.execute("SELECT 1 FROM order_returns WHERE order_id=%s LIMIT 1", (order_id,)).fetchone():
+            raise ValueError("Deze order heeft retourhistorie en kan niet worden verwijderd.")
 
         reversed_inventory = False
         if order["inventory_booked_at"] is not None:
@@ -85,4 +89,3 @@ def delete_order(session, expected_type, values):
         )
         conn.commit()
     return {"deleted": True, "inventoryReversed": reversed_inventory}
-

@@ -11,6 +11,7 @@ import app_runner
 import order_management as orders
 import order_delete
 import purchase_receipts
+import order_returns
 import warehouse_ops as warehouse
 import inventory_ledger
 import business_tools
@@ -143,6 +144,17 @@ class ExtendedHandler(app_runner.AppHandler):
             if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
             order_id=parse_qs(parsed.query).get('order_id',[''])[0].strip()
             self.send_json(200,{"receipts":purchase_receipts.rows(s['stockroom_id'],order_id)});return
+        if path=="/api/orders/returns":
+            s=self.require_session(api=True)
+            if not s:return
+            order_id=parse_qs(parsed.query).get('order_id',[''])[0].strip()
+            try:
+                data=order_returns.overview(s['stockroom_id'],order_id)
+                cap='read_purchase' if data['orderType']=='purchase' else 'read_sales'
+                if not orders.allowed(s['role'],cap):self.send_json(403,{"error":"Geen rechten."});return
+                self.send_json(200,data)
+            except PermissionError as e:self.send_json(404,{"error":str(e)})
+            return
         if path=="/api/inventory/movements":
             s=self.require_session(api=True)
             if not s:return
@@ -172,7 +184,7 @@ class ExtendedHandler(app_runner.AppHandler):
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/purchase-advice/drafts","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
+        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/purchase-advice/drafts","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -216,6 +228,11 @@ class ExtendedHandler(app_runner.AppHandler):
                     self.send_json(200,order_delete.delete_order(s,ot,values));return
                 if path=="/api/orders/receive":self.send_json(200,purchase_receipts.receive(s,values));return
                 if path=="/api/orders/receipt/reverse":self.send_json(200,purchase_receipts.reverse(s,values));return
+                if path=="/api/orders/returns":self.send_json(200,order_returns.create(s,values));return
+                if path=="/api/orders/returns/process":self.send_json(200,order_returns.process(s,values));return
+                if path=="/api/orders/returns/cancel":self.send_json(200,order_returns.change(s,values,'cancel'));return
+                if path=="/api/orders/returns/reverse":self.send_json(200,order_returns.change(s,values,'reverse'));return
+                if path=="/api/orders/returns/credit":self.send_json(200,order_returns.create_credit(s,values));return
                 if path=="/api/purchase-advice/drafts":self.send_json(200,orders.create_purchase_advice_drafts(s,values));return
                 if path=="/api/warehouse/count":self.send_json(200,{"updated":True,**warehouse.apply_count(s,values)});return
                 if path=="/api/warehouse/count/start":self.send_json(200,warehouse.start_count(s,values));return
@@ -235,6 +252,5 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_receipts.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_receipts.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()
-
