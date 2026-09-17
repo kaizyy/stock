@@ -94,6 +94,10 @@ def stockroom_notifications(stockroom_id,user_id=None):
             elif tx.get('type')=='incoming' and not tx.get('done'):notifications.append({'type':'delivery','severity':'info','title':'Levering nog niet ontvangen','detail':f"{tx.get('party') or tx.get('itemName') or 'Inkoop'}",'targetView':'incoming','targetType':'transaction','targetId':tid,'transactionId':tid})
         pending=conn.execute("SELECT id::text,order_type,status,order_number,reference,relation_name,order_date FROM orders WHERE stockroom_id=%s AND status NOT IN ('received','completed','paid','cancelled') ORDER BY order_date LIMIT 100",(stockroom_id,)).fetchall()
         for order in pending:notifications.append({'type':'order','severity':'info','title':f"Open order {order.get('order_number') or order.get('reference') or ''}",'detail':f"{order['relation_name'] or 'Geen relatie'} · {order['status']}",'targetView':'orders','targetType':'order','targetId':order['id'],'orderId':order['id'],'orderType':order['order_type'],'status':order['status']})
+        returns_ready=conn.execute("SELECT to_regclass('public.order_returns') IS NOT NULL AS ready").fetchone()['ready']
+        if returns_ready:
+            open_returns=conn.execute("SELECT r.id::text,r.rma_number,r.return_type,o.relation_name FROM order_returns r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.status='registered' ORDER BY r.created_at",(stockroom_id,)).fetchall()
+            for result in open_returns:notifications.append({'type':'return','severity':'warning','title':f"Retour {result['rma_number'] or ''} verwerken",'detail':result['relation_name'] or 'Geen relatie','targetView':'orders','targetType':'return','targetId':result['id'],'returnType':result['return_type']})
         errors=conn.execute("SELECT component,message,created_at FROM app_error_log WHERE stockroom_id=%s AND created_at>NOW()-INTERVAL '7 days' ORDER BY created_at DESC LIMIT 20",(stockroom_id,)).fetchall()
         for error in errors:notifications.append({'type':'system','severity':'danger','title':f"Systeemmelding: {error['component']}",'detail':error['message'][:250],'createdAt':error['created_at']})
         states={}
@@ -120,6 +124,14 @@ def action_center(stockroom_id, role):
             stock=float(item.get('stock') or 0);minimum=float(item.get('minStock') or 0)
             if minimum>0 and stock<=minimum:
                 actions.append({'key':f"stock:{item.get('id')}",'severity':'danger' if stock<=0 else 'warning','title':f"Besteladvies: {item.get('name') or 'Artikel'}",'detail':f"{stock:g} beschikbaar · minimum {minimum:g}",'targetView':'inventory','actionLabel':'Besteladvies openen'})
+        returns_ready=conn.execute("SELECT to_regclass('public.order_returns') IS NOT NULL AS ready").fetchone()['ready']
+        if returns_ready and (can_purchase or can_sales):
+            open_returns=conn.execute("""SELECT r.id::text,r.rma_number,r.return_type,r.created_at,o.relation_name
+                FROM order_returns r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.status='registered'
+                ORDER BY r.created_at""",(stockroom_id,)).fetchall()
+            for result in open_returns:
+                if (result['return_type']=='purchase' and not can_purchase) or (result['return_type']=='sales' and not can_sales):continue
+                actions.append({'key':f"return:{result['id']}",'severity':'warning','title':f"Retour {result['rma_number'] or ''} wacht op verwerking",'detail':f"{result['relation_name'] or 'Geen relatie'} · aangemeld {result['created_at'].strftime('%d-%m-%Y')}",'targetView':'orders','actionLabel':'Retour bekijken'})
         if role in ('owner','admin'):
             counts=conn.execute("SELECT id::text,title,submitted_at FROM inventory_counts WHERE stockroom_id=%s AND status='submitted' ORDER BY submitted_at",(stockroom_id,)).fetchall()
             for count in counts:actions.append({'key':f"count:{count['id']}",'severity':'warning','title':'Voorraadtelling wacht op goedkeuring','detail':count['title'],'targetView':'warehouse','actionLabel':'Telling beoordelen'})
@@ -166,4 +178,3 @@ def record_error(component,message,stockroom_id=None,user_id=None,details=None,l
         with server.db() as conn:
             conn.execute("INSERT INTO app_error_log(level,component,message,stockroom_id,user_id,details) VALUES(%s,%s,%s,%s,%s,%s::jsonb)",(level[:20],component[:100],str(message)[:2000],stockroom_id,user_id,json.dumps(details or {},ensure_ascii=False)));conn.commit()
     except Exception:pass
-

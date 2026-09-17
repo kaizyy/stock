@@ -1,6 +1,12 @@
 """Returns linked to delivered purchase and sales orders."""
 import json
+import io
 import uuid
+from datetime import datetime
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
 
 import financial_workflow
 import inventory_ledger
@@ -20,6 +26,13 @@ def initialize():
             id UUID PRIMARY KEY,return_id UUID NOT NULL REFERENCES order_returns(id) ON DELETE CASCADE,
             order_line_id UUID NOT NULL REFERENCES order_lines(id) ON DELETE RESTRICT,item_id TEXT NOT NULL,item_name TEXT NOT NULL,
             quantity NUMERIC(14,3) NOT NULL CHECK(quantity>0),unit_price NUMERIC(14,4) NOT NULL CHECK(unit_price>=0))""")
+        conn.execute("ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS rma_number TEXT")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_order_returns_rma ON order_returns(stockroom_id,rma_number) WHERE rma_number IS NOT NULL")
+        conn.execute("""CREATE TABLE IF NOT EXISTS return_sequences(
+            stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,year INTEGER NOT NULL,
+            last_value INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(stockroom_id,year))""")
+        for row in conn.execute("SELECT id::text,stockroom_id::text FROM order_returns WHERE rma_number IS NULL ORDER BY created_at,id").fetchall():
+            conn.execute("UPDATE order_returns SET rma_number=%s WHERE id=%s",(_next_rma(conn,row['stockroom_id']),row['id']))
         conn.execute("CREATE INDEX IF NOT EXISTS idx_order_returns_order ON order_returns(order_id,created_at DESC)")
         conn.commit()
 
@@ -36,7 +49,7 @@ def overview(stockroom_id, order_id):
         if not order:raise PermissionError('Order niet gevonden.')
         lines=_lines(conn,order_id)
         for line in lines:line['available_quantity']=max(0,float(line['fulfilled_quantity'])-float(line['returned_quantity']))
-        returns=conn.execute("""SELECT r.id::text,r.return_type,r.status,r.reference,r.reason,r.credit_amount::float8,r.credit_note_id::text,r.created_at,r.processed_at,
+        returns=conn.execute("""SELECT r.id::text,r.rma_number,r.return_type,r.status,r.reference,r.reason,r.credit_amount::float8,r.credit_note_id::text,r.created_at,r.processed_at,
                    u.name created_by_name,p.name processed_by_name
             FROM order_returns r LEFT JOIN users u ON u.id=r.created_by LEFT JOIN users p ON p.id=r.processed_by
             WHERE r.stockroom_id=%s AND r.order_id=%s ORDER BY r.created_at DESC""",(stockroom_id,order_id)).fetchall()
@@ -63,6 +76,13 @@ def _require_access(session, return_type, write=True):
         raise PermissionError('Geen rechten voor deze retour.')
 
 
+def _next_rma(conn, stockroom_id):
+    year=datetime.now().year
+    row=conn.execute("""INSERT INTO return_sequences(stockroom_id,year,last_value) VALUES(%s,%s,1)
+        ON CONFLICT(stockroom_id,year) DO UPDATE SET last_value=return_sequences.last_value+1 RETURNING last_value""",(stockroom_id,year)).fetchone()
+    return f"RMA-{year}-{int(row['last_value']):06d}"
+
+
 def create(session, values):
     order_id=(values.get('order_id') or '').strip();requested=_parse(values.get('lines_json'));reference=(values.get('reference') or '').strip()[:120];reason=(values.get('reason') or '').strip()[:1000]
     with server.db() as conn:
@@ -74,12 +94,40 @@ def create(session, values):
             line=lines.get(line_id);available=float(line['fulfilled_quantity'])-float(line['returned_quantity']) if line else 0
             if not line or quantity>available+0.0005:raise ValueError(f"Retouraantal is hoger dan geleverd voor {(line or {}).get('item_name','deze regel')}.")
             selected.append((line,quantity))
-        return_id=str(uuid.uuid4());subtotal=sum(quantity*float(line['unit_price']) for line,quantity in selected)
+        return_id=str(uuid.uuid4());rma_number=_next_rma(conn,session['stockroom_id']);subtotal=sum(quantity*float(line['unit_price']) for line,quantity in selected)
         vat=conn.execute("SELECT vat_percent::float8 FROM invoice_documents WHERE order_id=%s AND stockroom_id=%s AND deleted_at IS NULL",(order_id,session['stockroom_id'])).fetchone();credit=round(subtotal*(1+float((vat or {}).get('vat_percent') or 0)/100),2) if order['order_type']=='sales' else 0
-        conn.execute("INSERT INTO order_returns(id,stockroom_id,order_id,return_type,status,reference,reason,credit_amount,created_by) VALUES(%s,%s,%s,%s,'registered',%s,%s,%s,%s)",(return_id,session['stockroom_id'],order_id,order['order_type'],reference,reason,credit,session['user_id']))
+        conn.execute("INSERT INTO order_returns(id,stockroom_id,order_id,rma_number,return_type,status,reference,reason,credit_amount,created_by) VALUES(%s,%s,%s,%s,%s,'registered',%s,%s,%s,%s)",(return_id,session['stockroom_id'],order_id,rma_number,order['order_type'],reference,reason,credit,session['user_id']))
         for line,quantity in selected:conn.execute("INSERT INTO order_return_lines(id,return_id,order_line_id,item_id,item_name,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",(str(uuid.uuid4()),return_id,line['id'],line['item_id'],line['item_name'],quantity,line['unit_price']))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'return.registered',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'returnId':return_id,'orderId':order_id,'type':order['order_type'],'creditSuggestion':credit})));conn.commit()
-    return {'id':return_id,'creditAmount':credit}
+    return {'id':return_id,'rmaNumber':rma_number,'creditAmount':credit}
+
+
+def label_pdf(session, return_id):
+    with server.db() as conn:
+        result=conn.execute("""SELECT r.id::text,r.rma_number,r.return_type,r.status,r.reference,r.reason,r.created_at,
+                   o.order_number,o.relation_name,o.relation_id,s.name stockroom_name
+            FROM order_returns r JOIN orders o ON o.id=r.order_id JOIN stockrooms s ON s.id=r.stockroom_id
+            WHERE r.id=%s AND r.stockroom_id=%s""",(return_id,session['stockroom_id'])).fetchone()
+        if not result:raise PermissionError('Retour niet gevonden.')
+        _require_access(session,result['return_type'],False)
+        table='customers' if result['return_type']=='sales' else 'suppliers'
+        relation=conn.execute(f"SELECT address,email,phone FROM {table} WHERE id=%s AND stockroom_id=%s",(result['relation_id'],session['stockroom_id'])).fetchone() if result['relation_id'] else None
+        lines=conn.execute("SELECT item_name,quantity::float8 FROM order_return_lines WHERE return_id=%s ORDER BY item_name",(return_id,)).fetchall()
+    buf=io.BytesIO();pdf=canvas.Canvas(buf,pagesize=A4);pdf.setTitle(result['rma_number'] or 'Retourlabel')
+    pdf.setFont('Helvetica-Bold',22);pdf.drawString(18*mm,276*mm,'RETOURLABEL');pdf.setFont('Helvetica-Bold',16);pdf.drawRightString(192*mm,276*mm,result['rma_number'] or '')
+    pdf.setFont('Helvetica-Bold',11);pdf.drawString(18*mm,258*mm,'Retour naar / verwerken bij');pdf.setFont('Helvetica',11)
+    y=250*mm
+    for value in (result['stockroom_name'],):pdf.drawString(18*mm,y,str(value or ''));y-=7*mm
+    pdf.setFont('Helvetica-Bold',11);pdf.drawString(110*mm,258*mm,'Afzender / relatie');pdf.setFont('Helvetica',10);y2=250*mm
+    for value in (result['relation_name'],(relation or {}).get('address'),(relation or {}).get('email'),(relation or {}).get('phone')):
+        if value:pdf.drawString(110*mm,y2,str(value)[:48]);y2-=6*mm
+    pdf.line(18*mm,220*mm,192*mm,220*mm);pdf.setFont('Helvetica',10);y=210*mm
+    for label,value in [('RMA-nummer',result['rma_number']),('Order',result['order_number']),('Aangemeld',result['created_at'].strftime('%d-%m-%Y')),('Referentie',result['reference'] or '—')]:pdf.drawString(18*mm,y,f'{label}: {value or "—"}');y-=7*mm
+    y=190*mm;pdf.setFont('Helvetica-Bold',11);pdf.drawString(18*mm,y,'Inhoud retour');y-=8*mm;pdf.setFont('Helvetica',10)
+    for line in lines:pdf.drawString(18*mm,y,f"{float(line['quantity']):g} × {line['item_name'][:70]}");y-=7*mm
+    if result['reason']:y-=4*mm;pdf.setFont('Helvetica-Bold',10);pdf.drawString(18*mm,y,'Reden');y-=6*mm;pdf.setFont('Helvetica',9);pdf.drawString(18*mm,y,result['reason'][:110])
+    pdf.setFont('Helvetica',8);pdf.drawString(18*mm,16*mm,'Bewaar dit label bij de retourzending zodat de retour aan de juiste order wordt gekoppeld.')
+    pdf.save();return buf.getvalue(),f"{result['rma_number'] or return_id}.pdf"
 
 
 def process(session, values):

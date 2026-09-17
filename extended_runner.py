@@ -127,6 +127,13 @@ class ExtendedHandler(app_runner.AppHandler):
             try:data,name=business_tools.inventory_pdf(s['stockroom_id']);self.send_pdf(data,name)
             except Exception as e:platform_admin.record_error('inventory_pdf',type(e).__name__,s['stockroom_id'],s['user_id']);self.send_json(500,{"error":"PDF kon niet worden gegenereerd."})
             return
+        if path=="/api/documents/return.pdf":
+            s=self.require_session(api=True)
+            if not s:return
+            try:data,name=order_returns.label_pdf(s,parse_qs(parsed.query).get('id',[''])[0]);self.send_pdf(data,name)
+            except PermissionError as e:self.send_json(403,{"error":str(e)})
+            except Exception as e:platform_admin.record_error('return_label_pdf',type(e).__name__,s['stockroom_id'],s['user_id']);self.send_json(500,{"error":"Retourlabel kon niet worden gemaakt."})
+            return
         if path=="/api/warehouse":
             s=self.require_session(api=True)
             if not s:return
