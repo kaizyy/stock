@@ -25,7 +25,8 @@ def delete_order(session, expected_type, values):
             raise PermissionError("Geen rechten voor dit ordertype.")
         if conn.execute("SELECT 1 FROM purchase_receipts WHERE order_id=%s LIMIT 1", (order_id,)).fetchone():
             raise ValueError("Deze order heeft ontvangsthistorie en kan niet worden verwijderd.")
-        if conn.execute("SELECT 1 FROM order_returns WHERE order_id=%s LIMIT 1", (order_id,)).fetchone():
+        returns_ready = conn.execute("SELECT to_regclass('public.order_returns') IS NOT NULL AS ready").fetchone()["ready"]
+        if returns_ready and conn.execute("SELECT 1 FROM order_returns WHERE order_id=%s LIMIT 1", (order_id,)).fetchone():
             raise ValueError("Deze order heeft retourhistorie en kan niet worden verwijderd.")
 
         reversed_inventory = False
