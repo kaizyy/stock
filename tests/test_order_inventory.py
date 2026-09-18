@@ -115,11 +115,25 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(order["relation_id"], supplier_id)
         self.assertEqual(order["status"], "draft")
         self.assertEqual(order["lines"][0]["quantity"], 8)
+        self.assertIsNotNone(order["expected_delivery_date"])
+        self.assertEqual(order["advice_details"]["source"],"purchase_advice")
         self.assertEqual(order_management.open_purchase_quantities(str(self.room_id))[self.item_id], 8)
         with self.assertRaisesRegex(ValueError, "voldoende open"):
             order_management.create_purchase_advice_drafts(self.session, {"lines_json":json.dumps([
                 {"item_id":self.item_id, "quantity":8}
             ])})
+
+    def test_purchase_advice_requires_reason_for_supplier_override(self):
+        first=order_management.save_relation(self.session,"supplier",{"name":"Beste leverancier"})
+        second=order_management.save_relation(self.session,"supplier",{"name":"Alternatief"})
+        historical=order_management.create_order(self.session,{"order_type":"purchase","relation_id":first,"relation_name":"Beste leverancier","lines_json":json.dumps([{"item_id":self.item_id,"item_name":"Testitem","sku":"T-1","quantity":1,"unit_price":3}])})
+        order_management.update_order_status(self.session,"purchase",{"order_id":historical,"status":"ordered"})
+        line_id=order_management.order_rows(str(self.room_id),"purchase")[0]["lines"][0]["id"]
+        purchase_receipts.receive(self.session,{"order_id":historical,"lines_json":json.dumps([{"line_id":line_id,"quantity":1}])})
+        with self.assertRaisesRegex(ValueError,"reden"):
+            order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second}])})
+        result=order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second,"override_reason":"Contractuele afspraak"}])})
+        self.assertEqual(result["created"][0]["supplier"],"Alternatief")
 
     def test_partial_purchase_receipts_update_stock_status_and_can_reverse(self):
         order_id = self.create_order("purchase", 5, 3.5)

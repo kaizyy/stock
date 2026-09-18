@@ -3,6 +3,7 @@ import uuid
 
 import server
 import inventory_ledger
+import purchase_intelligence
 
 PURCHASE_STATUSES = {"draft", "ordered", "partial", "received", "cancelled"}
 SALES_STATUSES = {"draft", "processing", "shipped", "completed", "paid", "cancelled"}
@@ -58,6 +59,8 @@ def initialize_order_management():
             )
         """)
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS inventory_booked_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS expected_delivery_date DATE")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS advice_details JSONB NOT NULL DEFAULT '{}'::jsonb")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_stockroom_type_date ON orders(stockroom_id,order_type,order_date DESC)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS order_lines (
@@ -181,7 +184,7 @@ def delete_relation(session, kind, relation_id):
 def order_rows(stockroom_id, order_type):
     with server.db() as conn:
         rows = conn.execute(
-            """SELECT o.id::text,o.order_type,o.relation_id::text,o.relation_name,o.status,o.reference,o.notes,o.order_date,
+            """SELECT o.id::text,o.order_type,o.relation_id::text,o.relation_name,o.status,o.reference,o.notes,o.order_date,o.expected_delivery_date,o.advice_details,
                       o.inventory_booked_at,o.created_at,o.updated_at,
                       COALESCE(s.email,c.email,'') relation_email
                FROM orders o
@@ -307,7 +310,8 @@ def create_purchase_advice_drafts(session, values):
             raise ValueError("Controleer de geselecteerde aantallen.")
         if not item_id or quantity <= 0:
             raise ValueError("Ieder geselecteerd aantal moet groter dan nul zijn.")
-        requested_by_id[item_id] = quantity
+        requested_by_id[item_id] = {'quantity':quantity,'supplier_id':str(row.get('supplier_id') or '').strip() or None,'override_reason':str(row.get('override_reason') or '').strip()[:500]}
+    intelligence=purchase_intelligence.overview(session['stockroom_id']);recommendations={row['itemId']:row for row in intelligence['recommendations']};supplier_metrics={str(row['id']):row for row in intelligence['suppliers'] if row['id']}
     created = []
     with server.db() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("purchase-advice:" + session["stockroom_id"],))
@@ -323,33 +327,46 @@ def create_purchase_advice_drafts(session, values):
         supplier_by_name = {row["name"].strip().casefold(): row for row in suppliers}
         groups = {}
         skipped = []
-        for item_id, requested_qty in requested_by_id.items():
+        for item_id, selection in requested_by_id.items():
             item = items.get(item_id)
             if not item:
                 skipped.append(item_id)
                 continue
-            quantity = max(0, requested_qty - open_by_id.get(item_id, 0))
+            quantity = max(0, selection['quantity'] - open_by_id.get(item_id, 0))
             if quantity <= 0:
                 skipped.append(item_id)
                 continue
-            supplier_name = str(item.get("supplier") or "").strip()
-            supplier = supplier_by_name.get(supplier_name.casefold()) if supplier_name else None
+            advice=recommendations.get(item_id) or {};recommended=advice.get('recommended') or {};supplier=None
+            if selection['supplier_id']:supplier=next((row for row in suppliers if row['id']==selection['supplier_id']),None)
+            elif recommended.get('supplierId'):supplier=next((row for row in suppliers if row['id']==str(recommended['supplierId'])),None)
+            supplier_name=(supplier or {}).get('name') or recommended.get('supplierName') or str(item.get("supplier") or "").strip()
+            if selection['supplier_id'] and not supplier:raise PermissionError('Geselecteerde leverancier hoort niet bij deze stockroom.')
+            if supplier and recommended.get('supplierId') and supplier['id']!=str(recommended['supplierId']) and not selection['override_reason']:raise ValueError(f"Vul een reden in om voor {item.get('name') or 'dit artikel'} af te wijken van de geadviseerde leverancier.")
             key = supplier["id"] if supplier else "name:" + (supplier_name or "Niet gekoppeld")
+            metric=supplier_metrics.get((supplier or {}).get('id'));lead_days=max(1,round(float((metric or {}).get('avgLeadDays') or 14)))
+            chosen=next((option for option in advice.get('alternatives',[]) if str(option.get('supplierId') or '')==str((supplier or {}).get('id') or '')),None)
+            if chosen is None and (not supplier or str((supplier or {}).get('id') or '')==str(recommended.get('supplierId') or '')):chosen=recommended
+            chosen=chosen or {}
+            price=float((chosen or {}).get('latestPrice') or item.get('buy') or 0);change=(chosen or {}).get('priceChange');warning=bool(change is not None and change>=10)
             group = groups.setdefault(key, {"relation_id": supplier["id"] if supplier else None,
-                "relation_name": supplier["name"] if supplier else supplier_name or "Niet gekoppeld", "lines": []})
-            group["lines"].append((item_id, item.get("name") or "Artikel", item.get("sku") or "", quantity, float(item.get("buy") or 0)))
+                "relation_name": supplier["name"] if supplier else supplier_name or "Niet gekoppeld", "lead_days":lead_days,"warnings":[],"overrides":[],"lines": []})
+            if warning:group['warnings'].append(f"{item.get('name') or 'Artikel'}: prijs {change:+g}%")
+            if selection['override_reason']:group['overrides'].append({'itemId':item_id,'reason':selection['override_reason']})
+            group["lines"].append((item_id, item.get("name") or "Artikel", item.get("sku") or "", quantity, price))
         if not groups:
             raise ValueError("Voor deze selectie staat al voldoende open op concept- of inkooporders.")
         reference = "Besteladvies " + server.date.today().isoformat()
         for group in groups.values():
             order_id = str(uuid.uuid4())
-            conn.execute("""INSERT INTO orders(id,stockroom_id,order_type,relation_id,relation_name,status,reference,notes,order_date,created_by)
-                VALUES(%s,%s,'purchase',%s,%s,'draft',%s,%s,CURRENT_DATE,%s)""", (order_id, session["stockroom_id"],
-                group["relation_id"], group["relation_name"], reference, "Automatisch concept vanuit voorraadprognose; controleer aantallen en levertijd.", session["user_id"]))
+            details={'source':'purchase_advice','supplierScore':(supplier_metrics.get(str(group['relation_id'])) or {}).get('score'),'priceWarnings':group['warnings'],'overrides':group['overrides']}
+            notes="Automatisch concept vanuit voorraadprognose."+(" Prijscontrole nodig: "+"; ".join(group['warnings']) if group['warnings'] else "")
+            conn.execute("""INSERT INTO orders(id,stockroom_id,order_type,relation_id,relation_name,status,reference,notes,order_date,expected_delivery_date,advice_details,created_by)
+                VALUES(%s,%s,'purchase',%s,%s,'draft',%s,%s,CURRENT_DATE,CURRENT_DATE+(%s * INTERVAL '1 day'),%s::jsonb,%s)""", (order_id, session["stockroom_id"],
+                group["relation_id"], group["relation_name"], reference, notes,group['lead_days'],json.dumps(details), session["user_id"]))
             for item_id, item_name, sku, quantity, price in group["lines"]:
                 conn.execute("INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                              (str(uuid.uuid4()), order_id, item_id, item_name, sku, quantity, price))
-            created.append({"id": order_id, "supplier": group["relation_name"], "lines": len(group["lines"])})
+            created.append({"id": order_id, "supplier": group["relation_name"], "lines": len(group["lines"]),"expectedDeliveryDays":group['lead_days'],"priceWarnings":group['warnings']})
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase_advice.drafts_created',%s::jsonb)",
                      (session["stockroom_id"], session["user_id"], json.dumps({"orders": created, "skippedItems": skipped})))
         conn.commit()

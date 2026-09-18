@@ -23,7 +23,7 @@
     const target = document.getElementById('purchaseAdviceRows');
     const button = document.getElementById('createPurchaseDrafts');
     if (!target || !button) return;
-    target.innerHTML = rows.length ? rows.map(row => `<label class="purchase-advice-row"><input type="checkbox" data-advice-select="${esc(row.itemId)}" checked><span><strong>${esc(row.name)}</strong><small>${esc(row.sku || 'Geen SKU')}</small></span><span class="purchase-advice-supplier"><small>Leverancier</small>${esc(row.supplier || 'Niet gekoppeld')}</span><input aria-label="Aantal ${esc(row.name)}" data-advice-quantity="${esc(row.itemId)}" type="number" min="0.001" step="0.001" value="${row.recommended}"></label>`).join('') : '<div class="empty">Geen artikelen met besteladvies.</div>';
+    target.innerHTML = rows.length ? rows.map(row => `<div class="purchase-advice-row"><input type="checkbox" data-advice-select="${esc(row.itemId)}" checked><span><strong>${esc(row.name)}</strong><small>${esc(row.sku || 'Geen SKU')} · ${row.priceChange===null?'geen prijstrend':`${row.priceChange>0?'+':''}${row.priceChange}%`}${row.priceWarning?' · prijscontrole nodig':''}</small></span><span class="purchase-advice-supplier"><small>Geadviseerde leverancier</small><select data-advice-supplier="${esc(row.itemId)}">${row.alternatives.length?row.alternatives.map(option=>`<option value="${esc(option.supplierId||'')}" ${String(option.supplierId||'')===String(row.supplierId||'')?'selected':''}>${esc(option.supplierName)} · € ${Number(option.latestPrice).toFixed(2)} · ${option.score}/100</option>`).join(''):'<option value="">Niet gekoppeld</option>'}</select><input data-advice-reason="${esc(row.itemId)}" placeholder="Reden bij afwijkend advies"></span><input aria-label="Aantal ${esc(row.name)}" data-advice-quantity="${esc(row.itemId)}" type="number" min="0.001" step="0.001" value="${row.recommended}"></div>`).join('') : '<div class="empty">Geen artikelen met besteladvies.</div>';
     button.disabled = !rows.length;
   }
 
@@ -32,9 +32,10 @@
     const status = document.getElementById('purchaseAdviceStatus');
     if (status) status.textContent = 'Besteladvies laden…';
     try {
-      const [state, reservationData, openData] = await Promise.all([api('/api/state'), api('/api/finance/reservations').catch(() => ({items:[]})), api('/api/purchase-advice/open')]);
+      const [state, reservationData, openData, intelligence, supplierData] = await Promise.all([api('/api/state'), api('/api/finance/reservations').catch(() => ({items:[]})), api('/api/purchase-advice/open'),api('/api/purchase-intelligence').catch(()=>({recommendations:[]})),api('/api/suppliers').catch(()=>({items:[]}))]);
       const items = new Map((state.items || []).map(item => [String(item.id), item]));
-      rows = window.StockroomForecast.calculate(state, reservationData.items || []).map(row => {const openQuantity=Number(openData.items?.[String(row.itemId)]||0);return {...row,openQuantity,recommended:Math.max(0,row.recommended-openQuantity)}}).filter(row => row.recommended > 0).map(row => ({...row, supplier:items.get(String(row.itemId))?.supplier || ''}));
+      const advice=new Map((intelligence.recommendations||[]).map(row=>[String(row.itemId),row]));
+      rows = window.StockroomForecast.calculate(state, reservationData.items || []).map(row => {const openQuantity=Number(openData.items?.[String(row.itemId)]||0);return {...row,openQuantity,recommended:Math.max(0,row.recommended-openQuantity)}}).filter(row => row.recommended > 0).map(row => {const found=advice.get(String(row.itemId)),best=found?.recommended,known=found?.alternatives||[],missing=(supplierData.items||[]).filter(s=>!known.some(option=>String(option.supplierId||'')===String(s.id))).map(s=>({supplierId:s.id,supplierName:s.name,latestPrice:items.get(String(row.itemId))?.buy||0,score:0,noHistory:true}));return {...row,supplier:best?.supplierName||items.get(String(row.itemId))?.supplier||'',supplierId:best?.supplierId||'',alternatives:[...known,...missing],priceChange:best?.priceChange??null,priceWarning:Number(best?.priceChange||0)>=10}});
       render(); if (status) status.textContent = rows.length ? `${rows.length} adviesregels klaar voor controle.` : 'Voorraad is op peil.';
     } catch (error) { if (status) status.textContent = error.message; }
   }
@@ -42,7 +43,7 @@
   document.addEventListener('click', async event => {
     if (event.target.closest('#refreshPurchaseAdvice')) { refresh(); return; }
     const button = event.target.closest('#createPurchaseDrafts'); if (!button) return;
-    const selected = rows.filter(row => document.querySelector(`[data-advice-select="${CSS.escape(String(row.itemId))}"]`)?.checked).map(row => ({item_id:row.itemId, quantity:Number(document.querySelector(`[data-advice-quantity="${CSS.escape(String(row.itemId))}"]`)?.value)+row.openQuantity}));
+    const selected = rows.filter(row => document.querySelector(`[data-advice-select="${CSS.escape(String(row.itemId))}"]`)?.checked).map(row => ({item_id:row.itemId, quantity:Number(document.querySelector(`[data-advice-quantity="${CSS.escape(String(row.itemId))}"]`)?.value)+row.openQuantity,supplier_id:document.querySelector(`[data-advice-supplier="${CSS.escape(String(row.itemId))}"]`)?.value||'',override_reason:document.querySelector(`[data-advice-reason="${CSS.escape(String(row.itemId))}"]`)?.value||''}));
     if (!selected.length) { document.getElementById('purchaseAdviceStatus').textContent = 'Selecteer minimaal één artikel.'; return; }
     button.disabled = true;
     try {
