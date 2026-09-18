@@ -167,213 +167,27 @@ def action_center(stockroom_id, role):
                 FROM inventory_reservations r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.created_at<NOW()-INTERVAL '14 days' GROUP BY r.order_id,o.order_number,o.reference
                 UNION ALL SELECT 'quote',r.quote_id::text,q.quote_number,MIN(r.created_at) FROM quote_reservations r JOIN quotes q ON q.id=r.quote_id WHERE r.stockroom_id=%s AND r.created_at<NOW()-INTERVAL '14 days' GROUP BY r.quote_id,q.quote_number""",(stockroom_id,stockroom_id)).fetchall()
             for reservation in reservations:actions.append({'key':f"reservation:{reservation['kind']}:{reservation['id']}",'severity':'warning','title':'Reservering staat lang open','detail':f"{reservation['label']} Â· ouder dan 14 dagen",'targetView':'inventory','actionLabel':'Reservering bekijken'})
-    rank={'gŸzâÚ$z{-®éÜj×eference": f"TEST-{uuid.uuid4()}",
-            "relation_name": "Relatie",
-            "lines_json": json.dumps([{ "item_id": self.item_id, "item_name": "Testitem", "sku": "T-1", "quantity": qty, "unit_price": price }]),
-        })
+    rank={'danger':0,'warning':1,'info':2}
+    actions.sort(key=lambda action:(rank.get(action['severity'],3),action['title']))
+    return actions[:100]
 
-    def get_state(self):
+
+def update_notification_state(session,key,action):
+    key=(key or '')[:500]
+    if not key:raise ValueError('Melding ontbreekt.')
+    if action not in ('read','unread','dismiss','snooze'):raise ValueError('Ongeldige meldingactie.')
+    with server.db() as conn:
+        conn.execute("INSERT INTO notification_states(user_id,stockroom_id,notification_key) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING",(session['user_id'],session['stockroom_id'],key))
+        if action=='read':conn.execute("UPDATE notification_states SET read_at=NOW(),updated_at=NOW() WHERE user_id=%s AND stockroom_id=%s AND notification_key=%s",(session['user_id'],session['stockroom_id'],key))
+        elif action=='unread':conn.execute("UPDATE notification_states SET read_at=NULL,updated_at=NOW() WHERE user_id=%s AND stockroom_id=%s AND notification_key=%s",(session['user_id'],session['stockroom_id'],key))
+        elif action=='dismiss':conn.execute("UPDATE notification_states SET dismissed_at=NOW(),updated_at=NOW() WHERE user_id=%s AND stockroom_id=%s AND notification_key=%s",(session['user_id'],session['stockroom_id'],key))
+        else:conn.execute("UPDATE notification_states SET snoozed_until=NOW()+INTERVAL '1 day',updated_at=NOW() WHERE user_id=%s AND stockroom_id=%s AND notification_key=%s",(session['user_id'],session['stockroom_id'],key))
+        conn.commit()
+    return {'updated':True}
+
+
+def record_error(component,message,stockroom_id=None,user_id=None,details=None,level='error'):
+    try:
         with server.db() as conn:
-            return conn.execute("SELECT state FROM stockrooms WHERE id=%s", (self.room_id,)).fetchone()["state"]
-
-    def test_sales_completed_books_once(self):
-        order_id = self.create_order("sales", 3, 10)
-        order_management.update_order_status(self.session, "sales", {"order_id": order_id, "status": "completed"})
-        state = self.get_state()
-        self.assertEqual(state["items"][0]["stock"], 7)
-        self.assertEqual(len([t for t in state["transactions"] if t.get("orderId") == order_id]), 1)
-        order_management.update_order_status(self.session, "sales", {"order_id": order_id, "status": "paid"})
-        state = self.get_state()
-        self.assertEqual(state["items"][0]["stock"], 7)
-        self.assertEqual(len([t for t in state["transactions"] if t.get("orderId") == order_id]), 1)
-
-    def test_sales_completed_rejects_insufficient_stock(self):
-        with self.assertRaises(ValueError):
-            self.create_order("sales", 11, 10)
-        state = self.get_state()
-        self.assertEqual(state["items"][0]["stock"], 10)
-        with server.db() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) count FROM orders WHERE stockroom_id=%s",(self.room_id,)).fetchone()["count"],0)
-
-    def test_purchase_received_books_once_and_cannot_go_back(self):
-        order_id = self.create_order("purchase", 5, 3.5)
-        order_management.update_order_status(self.session, "purchase", {"order_id": order_id, "status": "received"})
-        state = self.get_state()
-        self.assertEqual(state["items"][0]["stock"], 15)
-        self.assertEqual(state["items"][0]["buy"], 3.5)
-        self.assertEqual(len([t for t in state["transactions"] if t.get("orderId") == order_id]), 1)
-        with self.assertRaises(ValueError):
-            order_management.update_order_status(self.session, "purchase", {"order_id": order_id, "status": "ordered"})
-        state = self.get_state()
-        self.assertEqual(state["items"][0]["stock"], 15)
-
-    def test_purchase_advice_groups_supplier_and_prevents_duplicate_draft(self):
-        supplier_id = order_management.save_relation(self.session, "supplier", {"name":"Supply BV", "email":"inkoop@example.test"})
-        with server.db() as conn:
-            state = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (self.room_id,)).fetchone()["state"]
-            state["items"][0]["supplier"] = "Supply BV"
-            conn.execute("UPDATE stockrooms SET state=%s::jsonb WHERE id=%s", (json.dumps(state), self.room_id))
-            conn.commit()
-        result = order_management.create_purchase_advice_drafts(self.session, {"lines_json":json.dumps([
-            {"item_id":self.item_id, "quantity":8}
-        ])})
-        self.assertEqual(len(result["created"]), 1)
-        order = order_management.order_rows(str(self.room_id), "purchase")[0]
-        self.assertEqual(order["relation_id"], supplier_id)
-        self.assertEqual(order["status"], "draft")
-        self.assertEqual(order["lines"][0]["quantity"], 8)
-        self.assertIsNotNone(order["expected_delivery_date"])
-        self.assertEqual(order["advice_details"]["source"],"purchase_advice")
-        self.assertEqual(order_management.open_purchase_quantities(str(self.room_id))[self.item_id], 8)
-        with self.assertRaisesRegex(ValueError, "voldoende open"):
-            order_management.create_purchase_advice_drafts(self.session, {"lines_json":json.dumps([
-                {"item_id":self.item_id, "quantity":8}
-            ])})
-
-    def test_purchase_advice_requires_reason_for_supplier_override(self):
-        first=order_management.save_relation(self.session,"supplier",{"name":"Beste leverancier"})
-        second=order_management.save_relation(self.session,"supplier",{"name":"Alternatief"})
-        historical=order_management.create_order(self.session,{"order_type":"purchase","relation_id":first,"relation_name":"Beste leverancier","lines_json":json.dumps([{"item_id":self.item_id,"item_name":"Testitem","sku":"T-1","quantity":1,"unit_price":3}])})
-        order_management.update_order_status(self.session,"purchase",{"order_id":historical,"status":"ordered"})
-        line_id=order_management.order_rows(str(self.room_id),"purchase")[0]["lines"][0]["id"]
-        purchase_receipts.receive(self.session,{"order_id":historical,"lines_json":json.dumps([{"line_id":line_id,"quantity":1}])})
-        with self.assertRaisesRegex(ValueError,"reden"):
-            order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second}])})
-        result=order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second,"override_reason":"Contractuele afspraak"}])})
-        self.assertEqual(result["created"][0]["supplier"],"Alternatief")
-
-    def test_purchase_budget_requires_and_records_approval(self):
-        purchase_approvals.save_policy(self.session,{"approval_threshold":"0","monthly_budget":"5","price_warning_requires_approval":"1"})
-        result=order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2}])})
-        self.assertTrue(result["created"][0]["approvalRequired"])
-        order=order_management.order_rows(str(self.room_id),"purchase")[0]
-        self.assertEqual(order["status"],"pending_approval");self.assertIn("Maandbudget",order["approval_reason"])
-        purchase_approvals.decide(self.session,{"order_id":order["id"],"reason":"Budget gecontroleerd"},"approve")
-        smtp=MagicMock();smtp.__enter__.return_value=smtp
-        with patch.object(server,"SMTP_HOST","smtp.example.test"),patch.object(server,"SMTP_PORT",587),patch.object(purchase_approvals.smtplib,"SMTP",return_value=smtp):
-            sent=purchase_approvals.send_order(self.session,{"order_id":order["id"],"recipient":"supplier@example.test"})
-        self.assertTrue(sent["sent"]);smtp.send_message.assert_called_once()
-        delivery=(date.today()+timedelta(days=10)).isoformat()
-        confirmation=purchase_approvals.confirm_delivery(self.session,{"order_id":order["id"],"confirmed_delivery_date":delivery,"confirmation_reference":"BEV-42"})
-        self.assertTrue(confirmation["confirmed"])
-        approved=order_management.order_rows(str(self.room_id),"purchase")[0]
-        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved");self.assertEqual(approved["purchase_sent_to"],"supplier@example.test");self.assertEqual(str(approved["confirmed_delivery_date"]),delivery)
-
-    def test_partial_purchase_receipts_update_stock_status_and_can_reverse(self):
-        order_id = self.create_order("purchase", 5, 3.5)
-        order_management.update_order_status(self.session, "purchase", {"order_id":order_id, "status":"ordered"})
-        line_id = order_management.order_rows(str(self.room_id), "purchase")[0]["lines"][0]["id"]
-        first = purchase_receipts.receive(self.session, {"order_id":order_id,"reference":"PB-1",
-            "lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
-        self.assertEqual(first["status"], "partial")
-        self.assertEqual(self.get_state()["items"][0]["stock"], 12)
-        second = purchase_receipts.receive(self.session, {"order_id":order_id,"reference":"PB-2",
-            "lines_json":json.dumps([{"line_id":line_id,"quantity":3}])})
-        self.assertEqual(second["status"], "received")
-        self.assertEqual(self.get_state()["items"][0]["stock"], 15)
-        self.assertEqual(len(purchase_receipts.rows(str(self.room_id),order_id)),2)
-        reversed_result=purchase_receipts.reverse(self.session,{"receipt_id":second["receiptId"]})
-        self.assertEqual(reversed_result["status"],"partial")
-        self.assertEqual(self.get_state()["items"][0]["stock"],12)
-        purchase_receipts.reverse(self.session,{"receipt_id":first["receiptId"]})
-        self.assertEqual(self.get_state()["items"][0]["stock"],10)
-        self.assertEqual(order_management.order_rows(str(self.room_id),"purchase")[0]["status"],"ordered")
-
-    def test_receipt_reversal_blocks_when_received_stock_was_used(self):
-        order_id=self.create_order("purchase",2,3.5);order_management.update_order_status(self.session,"purchase",{"order_id":order_id,"status":"ordered"})
-        line_id=order_management.order_rows(str(self.room_id),"purchase")[0]["lines"][0]["id"]
-        receipt=purchase_receipts.receive(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
-        with server.db() as conn:
-            state=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(self.room_id,)).fetchone()["state"];state["items"][0]["stock"]=1
-            conn.execute("UPDATE stockrooms SET state=%s::jsonb WHERE id=%s",(json.dumps(state),self.room_id));conn.commit()
-        with self.assertRaisesRegex(ValueError,"onvoldoende voorraad"):
-            purchase_receipts.reverse(self.session,{"receipt_id":receipt["receiptId"]})
-
-    def test_sales_return_is_bounded_processed_and_reversible(self):
-        order_id=self.create_order("sales",3,10)
-        order_management.update_order_status(self.session,"sales",{"order_id":order_id,"status":"completed"})
-        line_id=order_management.order_rows(str(self.room_id),"sales")[0]["lines"][0]["id"]
-        result=order_returns.create(self.session,{"order_id":order_id,"reason_code":"defective","reason":"Klantretour","lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
-        self.assertRegex(result["rmaNumber"],r"^RMA-\d{4}-\d{6}$")
-        label,filename=order_returns.label_pdf(self.session,result["id"])
-        self.assertTrue(label.startswith(b"%PDF"));self.assertTrue(filename.startswith("RMA-"))
-        self.assertEqual(self.get_state()["items"][0]["stock"],7)
-        order_returns.process(self.session,{"return_id":result["id"]})
-        self.assertEqual(self.get_state()["items"][0]["stock"],9)
-        report=order_returns.analytics(str(self.room_id))
-        self.assertEqual(report["summary"]["return_count"],1);self.assertEqual(report["reasons"][0]["label"],"defective")
-        self.assertEqual(report["items"][0]["quantity"],2)
-        with self.assertRaisesRegex(ValueError,"hoger dan geleverd"):
-            order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
-        order_returns.change(self.session,{"return_id":result["id"]},"reverse")
-        self.assertEqual(self.get_state()["items"][0]["stock"],7)
-        order_returns.change(self.session,{"return_id":result["id"]},"cancel")
-
-    def test_purchase_return_uses_only_received_quantity(self):
-        order_id=self.create_order("purchase",5,3.5)
-        order_management.update_order_status(self.session,"purchase",{"order_id":order_id,"status":"ordered"})
-        line_id=order_management.order_rows(str(self.room_id),"purchase")[0]["lines"][0]["id"]
-        purchase_receipts.receive(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":3}])})
-        result=order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
-        order_returns.process(self.session,{"return_id":result["id"]})
-        self.assertEqual(self.get_state()["items"][0]["stock"],11)
-        details=order_returns.overview(str(self.room_id),order_id)["returns"][0]
-        self.assertEqual(details["claim_status"],"open");self.assertEqual(details["expected_refund"],7)
-        order_returns.update_claim(self.session,{"return_id":result["id"],"claim_reference":"CLAIM-42","expected_refund":"7.00"})
-        partial=order_returns.record_refund(self.session,{"return_id":result["id"],"amount":"2.00","note":"deelbetaling"})
-        self.assertEqual(partial["claimStatus"],"partial")
-        settled=order_returns.record_refund(self.session,{"return_id":result["id"],"amount":"5.00","note":"slotbetaling"})
-        self.assertEqual(settled["claimStatus"],"settled")
-        intelligence=purchase_intelligence.overview(str(self.room_id))
-        self.assertEqual(intelligence["suppliers"][0]["name"],"Relatie")
-        self.assertAlmostEqual(intelligence["suppliers"][0]["returnRate"],66.7,places=1)
-        self.assertEqual(intelligence["recommendations"][0]["recommended"]["latestPrice"],3.5)
-        with self.assertRaisesRegex(ValueError,"hoger dan geleverd"):
-            order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
-        with self.assertRaisesRegex(ValueError,"terugbetaling"):
-            order_returns.change(self.session,{"return_id":result["id"]},"reverse")
-        self.assertEqual(self.get_state()["items"][0]["stock"],11)
-
-    def test_decimal_purchase_and_sale_preserve_stock_and_reservations(self):
-        purchase_id = self.create_order("purchase", 0.1)
-        order_management.update_order_status(self.session, "purchase", {"order_id": purchase_id, "status": "received"})
-        self.assertAlmostEqual(self.get_state()["items"][0]["stock"], 10.1)
-
-        sales_id = self.create_order("sales", 0.2)
-        reservation = financial_workflow.reservation_overview(str(self.room_id))[0]
-        self.assertAlmostEqual(reservation["reserved"], 0.2)
-        self.assertAlmostEqual(reservation["available"], 9.9)
-        order_management.update_order_status(self.session, "sales", {"order_id": sales_id, "status": "completed"})
-        state = self.get_state()
-        self.assertAlmostEqual(state["items"][0]["stock"], 9.9)
-        self.assertAlmostEqual(next(t for t in state["transactions"] if t.get("orderId") == sales_id)["qty"], 0.2)
-        self.assertAlmostEqual(financial_workflow.reservation_overview(str(self.room_id))[0]["available"], 9.9)
-
-    def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
-        quote = sales_workflow.create(self.session, {
-            "relation_name": "Relatie",
-            "lines_json": json.dumps([{"item_id": self.item_id, "item_name": "Testitem", "sku": "T-1", "quantity": 0.1, "unit_price": 10}]),
-        })
-        converted = sales_workflow.convert(self.session, quote["id"])
-        self.assertTrue(converted["invoiced"])
-        reservation = financial_workflow.reservation_overview(str(self.room_id))[0]
-        self.assertAlmostEqual(reservation["reserved"], 0.1)
-        self.assertAlmostEqual(reservation["available"], 9.9)
-
-        payment = sales_workflow.pay_quote_invoice(self.session, quote["id"], 1.21)
-        self.assertTrue(payment["converted"])
-        order_id = payment["order_id"]
-        reservation = financial_workflow.reservation_overview(str(self.room_id))[0]
-        self.assertAlmostEqual(reservation["reserved"], 0.1)
-        with server.db() as conn:
-            line = conn.execute("SELECT quantity::float8 quantity FROM order_lines WHERE order_id=%s", (order_id,)).fetchone()
-            invoice = conn.execute("SELECT paid_amount::float8 paid_amount FROM invoice_documents WHERE order_id=%s", (order_id,)).fetchone()
-        self.assertAlmostEqual(line["quantity"], 0.1)
-        self.assertAlmostEqual(invoice["paid_amount"], 1.21)
-        order_management.update_order_status(self.session, "sales", {"order_id": order_id, "status": "completed"})
-        self.assertAlmostEqual(self.get_state()["items"][0]["stock"], 9.9)
-        self.assertAlmostEqual(financial_workflow.reservation_overview(str(self.room_id))[0]["reserved"], 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            conn.execute("INSERT INTO app_error_log(level,component,message,stockroom_id,user_id,details) VALUES(%s,%s,%s,%s,%s,%s::jsonb)",(level[:20],component[:100],str(message)[:2000],stockroom_id,user_id,json.dumps(details or {},ensure_ascii=False)));conn.commit()
+    except Exception:pass
