@@ -22,6 +22,10 @@ def initialize():
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_sent_at TIMESTAMPTZ")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_sent_to TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_mail_count INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS supplier_confirmed_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_delivery_date DATE")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_reference TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_note TEXT NOT NULL DEFAULT ''")
         conn.commit()
 
 
@@ -107,3 +111,19 @@ def send_order(session, values):
         if not updated:raise ValueError('De orderstatus is ondertussen gewijzigd; controleer de orderhistorie.')
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.order_emailed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':order_id,'recipient':recipient,'orderNumber':number})));conn.commit()
     return {'sent':True,'recipient':recipient,'status':'ordered','orderNumber':number}
+
+
+def confirm_delivery(session, values):
+    if session.get('role') not in ('owner','admin','member','buyer'):raise PermissionError('Geen rechten om een leveranciersbevestiging vast te leggen.')
+    order_id=(values.get('order_id') or '').strip();delivery=(values.get('confirmed_delivery_date') or '').strip();reference=(values.get('confirmation_reference') or '').strip()[:120];note=(values.get('confirmation_note') or '').strip()[:1000]
+    if not delivery:raise ValueError('Vul de bevestigde leverdatum in.')
+    with server.db() as conn:
+        order=conn.execute("SELECT id,status,expected_delivery_date FROM orders WHERE id=%s AND stockroom_id=%s AND order_type='purchase' FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
+        if not order or order['status'] not in ('ordered','partial'):raise ValueError('Alleen een bestelde of deels ontvangen order kan worden bevestigd.')
+        try:
+            row=conn.execute("SELECT %s::date delivery",(delivery,)).fetchone();confirmed=row['delivery']
+        except Exception as exc:raise ValueError('De bevestigde leverdatum is ongeldig.') from exc
+        variance=(confirmed-order['expected_delivery_date']).days if order['expected_delivery_date'] else None
+        conn.execute("UPDATE orders SET supplier_confirmed_at=NOW(),confirmed_delivery_date=%s,confirmation_reference=%s,confirmation_note=%s,updated_at=NOW() WHERE id=%s",(confirmed,reference,note,order_id))
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.supplier_confirmed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':order_id,'confirmedDeliveryDate':str(confirmed),'reference':reference,'varianceDays':variance})));conn.commit()
+    return {'confirmed':True,'confirmedDeliveryDate':str(confirmed),'varianceDays':variance}

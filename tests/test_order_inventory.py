@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 import uuid
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import server
@@ -148,8 +149,11 @@ class OrderInventoryTests(unittest.TestCase):
         with patch.object(server,"SMTP_HOST","smtp.example.test"),patch.object(server,"SMTP_PORT",587),patch.object(purchase_approvals.smtplib,"SMTP",return_value=smtp):
             sent=purchase_approvals.send_order(self.session,{"order_id":order["id"],"recipient":"supplier@example.test"})
         self.assertTrue(sent["sent"]);smtp.send_message.assert_called_once()
+        delivery=(date.today()+timedelta(days=10)).isoformat()
+        confirmation=purchase_approvals.confirm_delivery(self.session,{"order_id":order["id"],"confirmed_delivery_date":delivery,"confirmation_reference":"BEV-42"})
+        self.assertTrue(confirmation["confirmed"])
         approved=order_management.order_rows(str(self.room_id),"purchase")[0]
-        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved");self.assertEqual(approved["purchase_sent_to"],"supplier@example.test")
+        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved");self.assertEqual(approved["purchase_sent_to"],"supplier@example.test");self.assertEqual(str(approved["confirmed_delivery_date"]),delivery)
 
     def test_partial_purchase_receipts_update_stock_status_and_can_reverse(self):
         order_id = self.create_order("purchase", 5, 3.5)
