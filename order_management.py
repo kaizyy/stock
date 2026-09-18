@@ -340,6 +340,7 @@ def create_purchase_advice_drafts(session, values):
             if selection['supplier_id']:supplier=next((row for row in suppliers if row['id']==selection['supplier_id']),None)
             elif recommended.get('supplierId'):supplier=next((row for row in suppliers if row['id']==str(recommended['supplierId'])),None)
             supplier_name=(supplier or {}).get('name') or recommended.get('supplierName') or str(item.get("supplier") or "").strip()
+            if not supplier and supplier_name:supplier=supplier_by_name.get(supplier_name.casefold())
             if selection['supplier_id'] and not supplier:raise PermissionError('Geselecteerde leverancier hoort niet bij deze stockroom.')
             if supplier and recommended.get('supplierId') and supplier['id']!=str(recommended['supplierId']) and not selection['override_reason']:raise ValueError(f"Vul een reden in om voor {item.get('name') or 'dit artikel'} af te wijken van de geadviseerde leverancier.")
             key = supplier["id"] if supplier else "name:" + (supplier_name or "Niet gekoppeld")
