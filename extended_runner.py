@@ -12,6 +12,7 @@ import order_management as orders
 import order_delete
 import purchase_receipts
 import order_returns
+import purchase_intelligence
 import warehouse_ops as warehouse
 import inventory_ledger
 import business_tools
@@ -145,6 +146,11 @@ class ExtendedHandler(app_runner.AppHandler):
             if not s:return
             if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
             self.send_json(200,{"items":orders.open_purchase_quantities(s['stockroom_id'])});return
+        if path=="/api/purchase-intelligence":
+            s=self.require_session(api=True)
+            if not s:return
+            if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
+            self.send_json(200,purchase_intelligence.overview(s['stockroom_id']));return
         if path=="/api/orders/receipts":
             s=self.require_session(api=True)
             if not s:return

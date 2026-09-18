@@ -57,4 +57,4 @@
   document.addEventListener('stockroom:refresh', event => { if (event.detail?.view === 'inventory') refresh(); });
   ensurePanel(); refresh();
 })();
-
+import('/purchase_intelligence_ui.js?v=20260918-1').catch(() => {});

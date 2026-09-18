@@ -63,6 +63,8 @@ def check_web_feature_parity() -> None:
     require(metrics, ["expectedPaidTotal", "expectedUnpaidTotal", "overdueTotal", "recentTotal", "isLowStock", "stockAfterTransactionRemoval"], "Overzichtsberekeningen en voorraadherberekening")
     require(forecast, ["historyDays", "horizonDays", "leadDays", "reservedByItem", "recommended", "daysCover", "urgency"], "Voorraadprognose en besteladvies")
     require(read("purchase_advice.js"), ["purchaseAdvicePanel", "data-advice-select", "/api/purchase-advice/drafts", "Concept-inkooporders"], "Besteladvies naar conceptorders")
+    require(read("purchase_intelligence.py"), ["avgLeadDays", "returnRate", "priceChange", "confidence", "recommended"], "Leveranciersscore en prijshistorie")
+    require(read("purchase_intelligence_ui.js"), ["purchaseIntelligence", "/api/purchase-intelligence", "Leveranciersscore", "Beste leverancier per artikel", "Recente inkoopprijzen"], "Inkoopanalysebediening")
     require(read("order_management.py"), ["create_purchase_advice_drafts", "pg_advisory_xact_lock", "purchase_advice.drafts_created", "fulfilled_quantity"], "Dubbelbestelling-beveiliging")
     require(read("purchase_receipts.py"), ["purchase_receipts", "fulfilled_quantity", "purchase_order_receipt", "purchase_receipt_reversed", "def reverse"], "Gedeeltelijke inkoopontvangsten")
     require(read("purchase_receipts_ui.js"), ["receiptDialog", "data-receipt-line", "/api/orders/receive", "data-reverse-receipt", "scanReceiptBtn", "stockroom:barcode", "Te veel gescand"], "Ontvangst- en barcodebediening")
@@ -90,7 +92,7 @@ def check_web_feature_parity() -> None:
     require(read("platform_admin.py"), ["def action_center", "inventory_counts", "late-delivery", "quote-followup", "reservation:", "return:", "supplier-claim:", "wacht op verwerking"], "Actiebronnen en rolfiltering")
     require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations', 'parse_stock_delta', 'decimal_json_number'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
-    require(dockerfile, ["action_center.js", "inventory_forecast.js", "purchase_advice.js", "purchase_receipts.py", "purchase_receipts_ui.js", "order_returns.py", "return_management.js", "return_analytics.js", "inventory_movements.js", "inventory_reconciliation_ui.js", "inventory_ledger.py", "/app/public/"], "Productie-assets voorraad")
+    require(dockerfile, ["action_center.js", "inventory_forecast.js", "purchase_advice.js", "purchase_intelligence.py", "purchase_intelligence_ui.js", "purchase_receipts.py", "purchase_receipts_ui.js", "order_returns.py", "return_management.js", "return_analytics.js", "inventory_movements.js", "inventory_reconciliation_ui.js", "inventory_ledger.py", "/app/public/"], "Productie-assets voorraad")
 
 
 def check_android_shell() -> None:

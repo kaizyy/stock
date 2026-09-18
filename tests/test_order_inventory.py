@@ -9,6 +9,7 @@ import dashboard_runner
 import order_management
 import purchase_receipts
 import order_returns
+import purchase_intelligence
 import business_tools
 import billing
 import documents_v3
@@ -185,6 +186,10 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(partial["claimStatus"],"partial")
         settled=order_returns.record_refund(self.session,{"return_id":result["id"],"amount":"5.00","note":"slotbetaling"})
         self.assertEqual(settled["claimStatus"],"settled")
+        intelligence=purchase_intelligence.overview(str(self.room_id))
+        self.assertEqual(intelligence["suppliers"][0]["name"],"Relatie")
+        self.assertAlmostEqual(intelligence["suppliers"][0]["returnRate"],66.7,places=1)
+        self.assertEqual(intelligence["recommendations"][0]["recommended"]["latestPrice"],3.5)
         with self.assertRaisesRegex(ValueError,"hoger dan geleverd"):
             order_returns.create(self.session,{"order_id":order_id,"lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
         with self.assertRaisesRegex(ValueError,"terugbetaling"):
