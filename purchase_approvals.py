@@ -186,7 +186,7 @@ def run_due_followups(session):
             o.last_delay_reminder_at,s.email supplier_email,s.name supplier_name,b.company_name
             FROM orders o LEFT JOIN suppliers s ON s.id=o.relation_id AND s.stockroom_id=o.stockroom_id
             LEFT JOIN billing_accounts b ON b.stockroom_id=o.stockroom_id
-            WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('ordered','partial') FOR UPDATE""",(session['stockroom_id'],)).fetchall()
+            WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('ordered','partial') FOR UPDATE OF o""",(session['stockroom_id'],)).fetchall()
         sent=[];skipped=[]
         for order in rows:
             kind=None
