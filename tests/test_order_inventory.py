@@ -10,6 +10,7 @@ import order_management
 import purchase_receipts
 import order_returns
 import purchase_intelligence
+import purchase_approvals
 import business_tools
 import billing
 import documents_v3
@@ -134,6 +135,17 @@ class OrderInventoryTests(unittest.TestCase):
             order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second}])})
         result=order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second,"override_reason":"Contractuele afspraak"}])})
         self.assertEqual(result["created"][0]["supplier"],"Alternatief")
+
+    def test_purchase_budget_requires_and_records_approval(self):
+        purchase_approvals.save_policy(self.session,{"approval_threshold":"0","monthly_budget":"5","price_warning_requires_approval":"1"})
+        result=order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2}])})
+        self.assertTrue(result["created"][0]["approvalRequired"])
+        order=order_management.order_rows(str(self.room_id),"purchase")[0]
+        self.assertEqual(order["status"],"pending_approval");self.assertIn("Maandbudget",order["approval_reason"])
+        purchase_approvals.decide(self.session,{"order_id":order["id"],"reason":"Budget gecontroleerd"},"approve")
+        order_management.update_order_status(self.session,"purchase",{"order_id":order["id"],"status":"ordered"})
+        approved=order_management.order_rows(str(self.room_id),"purchase")[0]
+        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved")
 
     def test_partial_purchase_receipts_update_stock_status_and_can_reverse(self):
         order_id = self.create_order("purchase", 5, 3.5)

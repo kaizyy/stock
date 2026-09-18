@@ -4,8 +4,9 @@ import uuid
 import server
 import inventory_ledger
 import purchase_intelligence
+import purchase_approvals
 
-PURCHASE_STATUSES = {"draft", "ordered", "partial", "received", "cancelled"}
+PURCHASE_STATUSES = {"draft", "pending_approval", "approved", "rejected", "ordered", "partial", "received", "cancelled"}
 SALES_STATUSES = {"draft", "processing", "shipped", "completed", "paid", "cancelled"}
 
 
@@ -61,6 +62,10 @@ def initialize_order_management():
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS inventory_booked_at TIMESTAMPTZ")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS expected_delivery_date DATE")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS advice_details JSONB NOT NULL DEFAULT '{}'::jsonb")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approval_status TEXT NOT NULL DEFAULT 'not_required'")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approval_reason TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id) ON DELETE SET NULL")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_stockroom_type_date ON orders(stockroom_id,order_type,order_date DESC)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS order_lines (
@@ -88,6 +93,7 @@ def initialize_order_management():
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(quote_id,item_id))""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_reservations_room_item ON quote_reservations(stockroom_id,item_id)")
         conn.commit()
+    purchase_approvals.initialize()
 
 
 def allowed(role, capability):
@@ -185,11 +191,12 @@ def order_rows(stockroom_id, order_type):
     with server.db() as conn:
         rows = conn.execute(
             """SELECT o.id::text,o.order_type,o.relation_id::text,o.relation_name,o.status,o.reference,o.notes,o.order_date,o.expected_delivery_date,o.advice_details,
-                      o.inventory_booked_at,o.created_at,o.updated_at,
+                      o.approval_status,o.approval_reason,o.approved_at,au.name approved_by_name,o.inventory_booked_at,o.created_at,o.updated_at,
                       COALESCE(s.email,c.email,'') relation_email
                FROM orders o
                LEFT JOIN suppliers s ON o.order_type='purchase' AND s.id=o.relation_id AND s.stockroom_id=o.stockroom_id
                LEFT JOIN customers c ON o.order_type='sales' AND c.id=o.relation_id AND c.stockroom_id=o.stockroom_id
+               LEFT JOIN users au ON au.id=o.approved_by
                WHERE o.stockroom_id=%s AND o.order_type=%s ORDER BY o.order_date DESC,o.created_at DESC LIMIT 200""",
             (stockroom_id, order_type),
         ).fetchall()
@@ -367,7 +374,9 @@ def create_purchase_advice_drafts(session, values):
             for item_id, item_name, sku, quantity, price in group["lines"]:
                 conn.execute("INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                              (str(uuid.uuid4()), order_id, item_id, item_name, sku, quantity, price))
-            created.append({"id": order_id, "supplier": group["relation_name"], "lines": len(group["lines"]),"expectedDeliveryDays":group['lead_days'],"priceWarnings":group['warnings']})
+            approval=purchase_approvals.evaluate(conn,session['stockroom_id'],order_id)
+            if approval['required']:conn.execute("UPDATE orders SET status='pending_approval',approval_status='pending',approval_reason=%s WHERE id=%s",('; '.join(approval['reasons']),order_id))
+            created.append({"id": order_id, "supplier": group["relation_name"], "lines": len(group["lines"]),"expectedDeliveryDays":group['lead_days'],"priceWarnings":group['warnings'],"approvalRequired":approval['required'],"approvalReasons":approval['reasons']})
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase_advice.drafts_created',%s::jsonb)",
                      (session["stockroom_id"], session["user_id"], json.dumps({"orders": created, "skippedItems": skipped})))
         conn.commit()
@@ -591,6 +600,14 @@ def update_order_status(session, expected_type, values):
         valid = PURCHASE_STATUSES if expected_type == "purchase" else SALES_STATUSES
         if status not in valid:
             raise ValueError("Orderstatus is ongeldig.")
+        if expected_type=='purchase' and status in ('pending_approval','approved','rejected'):
+            raise ValueError('Gebruik de goedkeuringsknoppen om deze status te wijzigen.')
+        if expected_type=='purchase' and status=='ordered' and order['status'] in ('draft','pending_approval','rejected'):
+            approval=purchase_approvals.evaluate(conn,session['stockroom_id'],order_id)
+            approval_state=conn.execute("SELECT approval_status FROM orders WHERE id=%s",(order_id,)).fetchone()['approval_status']
+            if approval['required'] and approval_state!='approved':
+                conn.execute("UPDATE orders SET status='pending_approval',approval_status='pending',approval_reason=%s,updated_at=NOW() WHERE id=%s",('; '.join(approval['reasons']),order_id))
+                conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.approval_requested',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':order_id,'reasons':approval['reasons']})));conn.commit();return expected_type
 
         already_booked = order["inventory_booked_at"] is not None
         if already_booked:

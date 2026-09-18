@@ -65,6 +65,8 @@ def check_web_feature_parity() -> None:
     require(read("purchase_advice.js"), ["purchaseAdvicePanel", "data-advice-select", "data-advice-supplier", "data-advice-reason", "priceWarning", "/api/purchase-advice/drafts", "Concept-inkooporders"], "Slim besteladvies naar conceptorders")
     require(read("purchase_intelligence.py"), ["avgLeadDays", "returnRate", "priceChange", "confidence", "recommended"], "Leveranciersscore en prijshistorie")
     require(read("purchase_intelligence_ui.js"), ["purchaseIntelligence", "/api/purchase-intelligence", "Leveranciersscore", "Beste leverancier per artikel", "Recente inkoopprijzen"], "Inkoopanalysebediening")
+    require(read("purchase_approvals.py"), ["purchase_policies", "approval_threshold", "monthly_budget", "def evaluate", "def decide", "purchase.{approval}"], "Inkoopgoedkeuring en budgetbeleid")
+    require(read("purchase_approval_ui.js"), ["purchasePolicy", "/api/purchase-policy", "data-approve-order", "data-reject-order", "Wacht op goedkeuring"], "Goedkeuringsbediening")
     require(read("order_management.py"), ["create_purchase_advice_drafts", "expected_delivery_date", "advice_details", "priceWarnings", "override_reason", "pg_advisory_xact_lock", "purchase_advice.drafts_created", "fulfilled_quantity"], "Slim leveranciersadvies en dubbelbestelling-beveiliging")
     require(read("purchase_receipts.py"), ["purchase_receipts", "fulfilled_quantity", "purchase_order_receipt", "purchase_receipt_reversed", "def reverse"], "Gedeeltelijke inkoopontvangsten")
     require(read("purchase_receipts_ui.js"), ["receiptDialog", "data-receipt-line", "/api/orders/receive", "data-reverse-receipt", "scanReceiptBtn", "stockroom:barcode", "Te veel gescand"], "Ontvangst- en barcodebediening")
@@ -89,10 +91,10 @@ def check_web_feature_parity() -> None:
     require(read("dynamic_navigation.js"), ["stockroom:refresh", "detail:{view:id}"], "Automatisch verversen bij navigatie")
     require(app, ["stockroom:refresh", "navigationRefreshTimer", "loadState()"], "Kerngegevens verversen bij navigatie")
     require(read("action_center.js"), ["actionCenter", "/api/action-center", "data-action-view", "stockroom:refresh"], "Centraal actiecentrum")
-    require(read("platform_admin.py"), ["def action_center", "inventory_counts", "late-delivery", "quote-followup", "reservation:", "return:", "supplier-claim:", "wacht op verwerking"], "Actiebronnen en rolfiltering")
+    require(read("platform_admin.py"), ["def action_center", "inventory_counts", "late-delivery", "purchase-approval:", "quote-followup", "reservation:", "return:", "supplier-claim:", "wacht op verwerking"], "Actiebronnen en rolfiltering")
     require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations', 'parse_stock_delta', 'decimal_json_number'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
-    require(dockerfile, ["action_center.js", "inventory_forecast.js", "purchase_advice.js", "purchase_intelligence.py", "purchase_intelligence_ui.js", "purchase_receipts.py", "purchase_receipts_ui.js", "order_returns.py", "return_management.js", "return_analytics.js", "inventory_movements.js", "inventory_reconciliation_ui.js", "inventory_ledger.py", "/app/public/"], "Productie-assets voorraad")
+    require(dockerfile, ["action_center.js", "inventory_forecast.js", "purchase_advice.js", "purchase_intelligence.py", "purchase_intelligence_ui.js", "purchase_approvals.py", "purchase_approval_ui.js", "purchase_receipts.py", "purchase_receipts_ui.js", "order_returns.py", "return_management.js", "return_analytics.js", "inventory_movements.js", "inventory_reconciliation_ui.js", "inventory_ledger.py", "/app/public/"], "Productie-assets voorraad")
 
 
 def check_android_shell() -> None:

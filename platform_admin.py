@@ -146,6 +146,9 @@ def action_center(stockroom_id, role):
             for order in drafts:actions.append({'key':f"purchase-draft:{order['id']}",'severity':'info','title':'Concept-inkooporder controleren','detail':f"{order['number'] or 'Concept'} · {order['relation_name'] or 'Geen leverancier'}",'targetView':'orders','actionLabel':'Order openen'})
             late=conn.execute("SELECT id::text,COALESCE(order_number,reference,'') number,relation_name,order_date FROM orders WHERE stockroom_id=%s AND order_type='purchase' AND status IN ('ordered','partial') AND order_date<CURRENT_DATE-14 ORDER BY order_date",(stockroom_id,)).fetchall()
             for order in late:actions.append({'key':f"late-delivery:{order['id']}",'severity':'warning','title':'Levering mogelijk te laat','detail':f"{order['number'] or 'Inkooporder'} · besteld op {order['order_date'].strftime('%d-%m-%Y')}",'targetView':'orders','actionLabel':'Levering bekijken'})
+            if role in ('owner','admin'):
+                approvals=conn.execute("SELECT id::text,COALESCE(order_number,reference,'Inkooporder') number,relation_name,approval_reason FROM orders WHERE stockroom_id=%s AND order_type='purchase' AND status='pending_approval' ORDER BY created_at",(stockroom_id,)).fetchall()
+                for order in approvals:actions.append({'key':f"purchase-approval:{order['id']}",'severity':'warning','title':'Inkooporder wacht op goedkeuring','detail':f"{order['number']} · {order['relation_name'] or 'Geen leverancier'} · {order['approval_reason']}",'targetView':'orders','actionLabel':'Order beoordelen'})
         if can_sales:
             invoices=conn.execute("""SELECT i.order_id::text id,i.invoice_number,i.due_date,o.relation_name
                 FROM invoice_documents i JOIN orders o ON o.id=i.order_id
