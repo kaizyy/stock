@@ -66,6 +66,9 @@ def initialize_order_management():
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approval_reason TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id) ON DELETE SET NULL")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_sent_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_sent_to TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_mail_count INTEGER NOT NULL DEFAULT 0")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_stockroom_type_date ON orders(stockroom_id,order_type,order_date DESC)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS order_lines (
@@ -191,7 +194,7 @@ def order_rows(stockroom_id, order_type):
     with server.db() as conn:
         rows = conn.execute(
             """SELECT o.id::text,o.order_type,o.relation_id::text,o.relation_name,o.status,o.reference,o.notes,o.order_date,o.expected_delivery_date,o.advice_details,
-                      o.approval_status,o.approval_reason,o.approved_at,au.name approved_by_name,o.inventory_booked_at,o.created_at,o.updated_at,
+                      o.approval_status,o.approval_reason,o.approved_at,au.name approved_by_name,o.purchase_sent_at,o.purchase_sent_to,o.purchase_mail_count,o.inventory_booked_at,o.created_at,o.updated_at,
                       COALESCE(s.email,c.email,'') relation_email
                FROM orders o
                LEFT JOIN suppliers s ON o.order_type='purchase' AND s.id=o.relation_id AND s.stockroom_id=o.stockroom_id

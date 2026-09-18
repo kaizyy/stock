@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 import uuid
+from unittest.mock import MagicMock, patch
 
 import server
 import runner
@@ -143,9 +144,12 @@ class OrderInventoryTests(unittest.TestCase):
         order=order_management.order_rows(str(self.room_id),"purchase")[0]
         self.assertEqual(order["status"],"pending_approval");self.assertIn("Maandbudget",order["approval_reason"])
         purchase_approvals.decide(self.session,{"order_id":order["id"],"reason":"Budget gecontroleerd"},"approve")
-        order_management.update_order_status(self.session,"purchase",{"order_id":order["id"],"status":"ordered"})
+        smtp=MagicMock();smtp.__enter__.return_value=smtp
+        with patch.object(server,"SMTP_HOST","smtp.example.test"),patch.object(server,"SMTP_PORT",587),patch.object(purchase_approvals.smtplib,"SMTP",return_value=smtp):
+            sent=purchase_approvals.send_order(self.session,{"order_id":order["id"],"recipient":"supplier@example.test"})
+        self.assertTrue(sent["sent"]);smtp.send_message.assert_called_once()
         approved=order_management.order_rows(str(self.room_id),"purchase")[0]
-        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved")
+        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved");self.assertEqual(approved["purchase_sent_to"],"supplier@example.test")
 
     def test_partial_purchase_receipts_update_stock_status_and_can_reverse(self):
         order_id = self.create_order("purchase", 5, 3.5)

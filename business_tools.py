@@ -110,7 +110,7 @@ def order_pdf(stockroom_id, order_id):
     _pdf_header(c, title, order['stockroom_name'])
     c.setFont('Helvetica', 10)
     y=258*mm
-    for label,value in [('Ordernummer',order['order_number'] or '—'),('Referentie',order['reference'] or '—'),('Relatie',order['relation_name'] or '—'),('Datum',str(order['order_date'])),('Status',order['status'])]:
+    for label,value in [('Ordernummer',order['order_number'] or '—'),('Referentie',order['reference'] or '—'),('Relatie',order['relation_name'] or '—'),('Datum',str(order['order_date'])),('Verwachte levering',str(order.get('expected_delivery_date') or '—')),('Status',order['status'])]:
         c.drawString(20*mm,y,f'{label}: {value}'); y-=6*mm
     y-=4*mm; c.setFont('Helvetica-Bold',9)
     c.drawString(20*mm,y,'Artikel'); c.drawString(105*mm,y,'Aantal'); c.drawString(135*mm,y,'Prijs'); c.drawRightString(190*mm,y,'Totaal'); y-=5*mm

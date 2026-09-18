@@ -1,6 +1,10 @@
 """Purchase approval policy and monthly budget controls."""
 import json
+import smtplib
+import ssl
+from email.message import EmailMessage
 
+import business_tools
 import server
 
 
@@ -15,6 +19,9 @@ def initialize():
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approval_reason TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id) ON DELETE SET NULL")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_sent_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_sent_to TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_mail_count INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
 
@@ -64,3 +71,39 @@ def decide(session, values, decision):
         conn.execute("UPDATE orders SET status=%s,approval_status=%s,approval_reason=%s,approved_by=%s,approved_at=NOW(),updated_at=NOW() WHERE id=%s",(status,approval,reason,session['user_id'],order_id))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",(session['stockroom_id'],session['user_id'],f'purchase.{approval}',json.dumps({'id':order_id,'reason':reason})));conn.commit()
     return {'updated':True,'status':status}
+
+
+def send_order(session, values):
+    if session.get('role') not in ('owner','admin','member','buyer'):raise PermissionError('Geen rechten om een inkooporder te versturen.')
+    order_id=(values.get('order_id') or '').strip()
+    with server.db() as conn:
+        order=conn.execute("""SELECT o.id::text,o.status,o.approval_status,o.relation_id,o.relation_name,o.order_number,
+                   s.email supplier_email,s.name supplier_name,b.company_name
+            FROM orders o LEFT JOIN suppliers s ON s.id=o.relation_id AND s.stockroom_id=o.stockroom_id
+            LEFT JOIN billing_accounts b ON b.stockroom_id=o.stockroom_id
+            WHERE o.id=%s AND o.stockroom_id=%s AND o.order_type='purchase'""",(order_id,session['stockroom_id'])).fetchone()
+    if not order:raise PermissionError('Inkooporder niet gevonden.')
+    if order['status']!='approved' or order['approval_status']!='approved':raise ValueError('Alleen een goedgekeurde inkooporder kan worden verstuurd.')
+    recipient=(values.get('recipient') or order['supplier_email'] or '').strip()
+    if '@' not in recipient:raise ValueError('Geen geldig e-mailadres voor deze leverancier ingesteld.')
+    if not server.SMTP_HOST:raise ValueError('SMTP is niet geconfigureerd.')
+    number=order['order_number'] or business_tools.assign_order_number(order_id,session['stockroom_id'],'purchase')
+    data,filename=business_tools.order_pdf(session['stockroom_id'],order_id);company=(order['company_name'] or '').strip() or 'Stockroom'
+    default=f"Beste {order['supplier_name'] or order['relation_name'] or 'leverancier'},\n\nIn de bijlage vindt u onze inkooporder {number}. Wilt u de ontvangst en verwachte leverdatum bevestigen?\n\nMet vriendelijke groet,\n{company}"
+    message=(values.get('message') or default).strip();mail=EmailMessage();mail['From']=server.SMTP_FROM;mail['To']=recipient;mail['Subject']=f"Inkooporder {number} - {company}";mail.set_content(message);mail.add_attachment(data,maintype='application',subtype='pdf',filename=filename)
+    context=ssl.create_default_context()
+    if server.SMTP_PORT==465:
+        with smtplib.SMTP_SSL(server.SMTP_HOST,server.SMTP_PORT,timeout=20,context=context) as smtp:
+            if server.SMTP_USERNAME:smtp.login(server.SMTP_USERNAME,server.SMTP_PASSWORD)
+            smtp.send_message(mail)
+    else:
+        with smtplib.SMTP(server.SMTP_HOST,server.SMTP_PORT,timeout=20) as smtp:
+            smtp.ehlo();smtp.starttls(context=context);smtp.ehlo()
+            if server.SMTP_USERNAME:smtp.login(server.SMTP_USERNAME,server.SMTP_PASSWORD)
+            smtp.send_message(mail)
+    with server.db() as conn:
+        updated=conn.execute("""UPDATE orders SET status='ordered',purchase_sent_at=NOW(),purchase_sent_to=%s,
+            purchase_mail_count=purchase_mail_count+1,updated_at=NOW() WHERE id=%s AND stockroom_id=%s AND status='approved' RETURNING id""",(recipient,order_id,session['stockroom_id'])).fetchone()
+        if not updated:raise ValueError('De orderstatus is ondertussen gewijzigd; controleer de orderhistorie.')
+        conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.order_emailed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':order_id,'recipient':recipient,'orderNumber':number})));conn.commit()
+    return {'sent':True,'recipient':recipient,'status':'ordered','orderNumber':number}
