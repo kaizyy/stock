@@ -26,13 +26,19 @@ def initialize():
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_delivery_date DATE")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_reference TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmation_note TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE purchase_policies ADD COLUMN IF NOT EXISTS auto_followup_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+        conn.execute("ALTER TABLE purchase_policies ADD COLUMN IF NOT EXISTS confirmation_reminder_days INTEGER NOT NULL DEFAULT 3")
+        conn.execute("ALTER TABLE purchase_policies ADD COLUMN IF NOT EXISTS delay_reminder_days INTEGER NOT NULL DEFAULT 2")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_confirmation_reminder_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_delay_reminder_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS followup_mail_count INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
 
 def policy(stockroom_id):
     with server.db() as conn:
-        row=conn.execute("SELECT approval_threshold::float8,monthly_budget::float8,price_warning_requires_approval FROM purchase_policies WHERE stockroom_id=%s",(stockroom_id,)).fetchone()
-    return row or {'approval_threshold':500.0,'monthly_budget':0.0,'price_warning_requires_approval':True}
+        row=conn.execute("SELECT approval_threshold::float8,monthly_budget::float8,price_warning_requires_approval,auto_followup_enabled,confirmation_reminder_days,delay_reminder_days FROM purchase_policies WHERE stockroom_id=%s",(stockroom_id,)).fetchone()
+    return row or {'approval_threshold':500.0,'monthly_budget':0.0,'price_warning_requires_approval':True,'auto_followup_enabled':True,'confirmation_reminder_days':3,'delay_reminder_days':2}
 
 
 def save_policy(session, values):
@@ -40,11 +46,15 @@ def save_policy(session, values):
     try:threshold=round(float(values.get('approval_threshold') or 0),2);budget=round(float(values.get('monthly_budget') or 0),2)
     except (TypeError,ValueError):raise ValueError('Controleer de bedragen van het inkoopbeleid.')
     if threshold<0 or budget<0:raise ValueError('Budgetbedragen kunnen niet negatief zijn.')
-    warning=str(values.get('price_warning_requires_approval') or '') in ('1','true','on')
+    warning=str(values.get('price_warning_requires_approval') or '') in ('1','true','on');auto=str(values.get('auto_followup_enabled') or '') in ('1','true','on')
+    try:confirmation_days=int(values.get('confirmation_reminder_days') or 3);delay_days=int(values.get('delay_reminder_days') or 2)
+    except (TypeError,ValueError):raise ValueError('Controleer de herinneringstermijnen.')
+    if not 1<=confirmation_days<=30 or not 1<=delay_days<=30:raise ValueError('Herinneringstermijnen moeten tussen 1 en 30 dagen liggen.')
     with server.db() as conn:
         conn.execute("""INSERT INTO purchase_policies(stockroom_id,approval_threshold,monthly_budget,price_warning_requires_approval,updated_by)
             VALUES(%s,%s,%s,%s,%s) ON CONFLICT(stockroom_id) DO UPDATE SET approval_threshold=EXCLUDED.approval_threshold,
             monthly_budget=EXCLUDED.monthly_budget,price_warning_requires_approval=EXCLUDED.price_warning_requires_approval,updated_by=EXCLUDED.updated_by,updated_at=NOW()""",(session['stockroom_id'],threshold,budget,warning,session['user_id']))
+        conn.execute("UPDATE purchase_policies SET auto_followup_enabled=%s,confirmation_reminder_days=%s,delay_reminder_days=%s WHERE stockroom_id=%s",(auto,confirmation_days,delay_days,session['stockroom_id']))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.policy_updated',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'approvalThreshold':threshold,'monthlyBudget':budget,'priceWarningApproval':warning})));conn.commit()
     return {'saved':True,**policy(session['stockroom_id'])}
 
@@ -127,3 +137,66 @@ def confirm_delivery(session, values):
         conn.execute("UPDATE orders SET supplier_confirmed_at=NOW(),confirmed_delivery_date=%s,confirmation_reference=%s,confirmation_note=%s,updated_at=NOW() WHERE id=%s",(confirmed,reference,note,order_id))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.supplier_confirmed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':order_id,'confirmedDeliveryDate':str(confirmed),'reference':reference,'varianceDays':variance})));conn.commit()
     return {'confirmed':True,'confirmedDeliveryDate':str(confirmed),'varianceDays':variance}
+
+
+def followup_overview(stockroom_id):
+    with server.db() as conn:
+        rows=conn.execute("""SELECT o.id::text,COALESCE(o.order_number,o.reference,'Inkooporder') number,o.relation_name,
+            o.status,o.purchase_sent_at,o.purchase_sent_to,o.supplier_confirmed_at,o.confirmed_delivery_date,
+            o.last_confirmation_reminder_at,o.last_delay_reminder_at,o.followup_mail_count
+            FROM orders o WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('ordered','partial')
+            ORDER BY COALESCE(o.confirmed_delivery_date,o.expected_delivery_date,o.order_date),o.created_at""",(stockroom_id,)).fetchall()
+    today=__import__('datetime').date.today();items=[]
+    for row in rows:
+        item=dict(row);date=item.get('confirmed_delivery_date')
+        item['followup_status']='partial' if item['status']=='partial' else ('delayed' if date and date<today else ('confirmed' if item.get('supplier_confirmed_at') else 'awaiting_confirmation'))
+        items.append(item)
+    return {'orders':items,'summary':{key:sum(1 for item in items if item['followup_status']==key) for key in ('awaiting_confirmation','confirmed','delayed','partial')}}
+
+
+def _send_followup(order, kind):
+    if not server.SMTP_HOST:raise ValueError('SMTP is niet geconfigureerd.')
+    recipient=(order.get('purchase_sent_to') or order.get('supplier_email') or '').strip()
+    if '@' not in recipient:raise ValueError('Leverancier heeft geen geldig e-mailadres.')
+    company=(order.get('company_name') or '').strip() or 'Stockroom';number=order.get('number') or 'Inkooporder'
+    if kind=='confirmation':
+        subject=f'Herinnering: bevestiging inkooporder {number}';body=f"Beste {order.get('supplier_name') or order.get('relation_name') or 'leverancier'},\n\nWilt u de ontvangst van inkooporder {number} en de verwachte leverdatum bevestigen?\n\nMet vriendelijke groet,\n{company}"
+    else:
+        subject=f'Verzoek nieuwe leverdatum inkooporder {number}';body=f"Beste {order.get('supplier_name') or order.get('relation_name') or 'leverancier'},\n\nDe bevestigde leverdatum van inkooporder {number} is verstreken. Wilt u de actuele leverstatus en een nieuwe verwachte leverdatum doorgeven?\n\nMet vriendelijke groet,\n{company}"
+    mail=EmailMessage();mail['From']=server.SMTP_FROM;mail['To']=recipient;mail['Subject']=subject;mail.set_content(body);context=ssl.create_default_context()
+    if server.SMTP_PORT==465:
+        with smtplib.SMTP_SSL(server.SMTP_HOST,server.SMTP_PORT,timeout=20,context=context) as smtp:
+            if server.SMTP_USERNAME:smtp.login(server.SMTP_USERNAME,server.SMTP_PASSWORD)
+            smtp.send_message(mail)
+    else:
+        with smtplib.SMTP(server.SMTP_HOST,server.SMTP_PORT,timeout=20) as smtp:
+            smtp.ehlo();smtp.starttls(context=context);smtp.ehlo()
+            if server.SMTP_USERNAME:smtp.login(server.SMTP_USERNAME,server.SMTP_PASSWORD)
+            smtp.send_message(mail)
+    return recipient
+
+
+def run_due_followups(session):
+    if session.get('role') not in ('owner','admin','member','buyer'):raise PermissionError('Geen rechten om leveranciers op te volgen.')
+    setting=policy(session['stockroom_id'])
+    if not setting.get('auto_followup_enabled'):return {'enabled':False,'sent':[],'skipped':[]}
+    with server.db() as conn:
+        rows=conn.execute("""SELECT o.id::text,COALESCE(o.order_number,o.reference,'Inkooporder') number,o.relation_name,o.status,
+            o.purchase_sent_at,o.purchase_sent_to,o.supplier_confirmed_at,o.confirmed_delivery_date,o.last_confirmation_reminder_at,
+            o.last_delay_reminder_at,s.email supplier_email,s.name supplier_name,b.company_name
+            FROM orders o LEFT JOIN suppliers s ON s.id=o.relation_id AND s.stockroom_id=o.stockroom_id
+            LEFT JOIN billing_accounts b ON b.stockroom_id=o.stockroom_id
+            WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('ordered','partial') FOR UPDATE""",(session['stockroom_id'],)).fetchall()
+        sent=[];skipped=[]
+        for order in rows:
+            kind=None
+            if not order['supplier_confirmed_at'] and order['purchase_sent_at'] and conn.execute("SELECT %s<NOW()-(%s*INTERVAL '1 day') due",(order['purchase_sent_at'],setting['confirmation_reminder_days'])).fetchone()['due'] and (not order['last_confirmation_reminder_at'] or conn.execute("SELECT %s<NOW()-(%s*INTERVAL '1 day') due",(order['last_confirmation_reminder_at'],setting['confirmation_reminder_days'])).fetchone()['due']):kind='confirmation'
+            elif order['confirmed_delivery_date'] and conn.execute("SELECT %s<CURRENT_DATE due",(order['confirmed_delivery_date'],)).fetchone()['due'] and (not order['last_delay_reminder_at'] or conn.execute("SELECT %s<NOW()-(%s*INTERVAL '1 day') due",(order['last_delay_reminder_at'],setting['delay_reminder_days'])).fetchone()['due']):kind='delay'
+            if not kind:continue
+            try:
+                recipient=_send_followup(order,kind);column='last_confirmation_reminder_at' if kind=='confirmation' else 'last_delay_reminder_at'
+                conn.execute(f"UPDATE orders SET {column}=NOW(),followup_mail_count=followup_mail_count+1,updated_at=NOW() WHERE id=%s",(order['id'],))
+                conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.followup_emailed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':order['id'],'kind':kind,'recipient':recipient})));sent.append({'id':order['id'],'kind':kind,'recipient':recipient})
+            except ValueError as exc:skipped.append({'id':order['id'],'reason':str(exc)})
+        conn.commit()
+    return {'enabled':True,'sent':sent,'skipped':skipped}

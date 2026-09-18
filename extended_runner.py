@@ -157,6 +157,11 @@ class ExtendedHandler(app_runner.AppHandler):
             if not s:return
             if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
             self.send_json(200,purchase_approvals.policy(s['stockroom_id']));return
+        if path=="/api/purchase-followup":
+            s=self.require_session(api=True)
+            if not s:return
+            if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
+            self.send_json(200,purchase_approvals.followup_overview(s['stockroom_id']));return
         if path=="/api/orders/receipts":
             s=self.require_session(api=True)
             if not s:return
@@ -208,7 +213,7 @@ class ExtendedHandler(app_runner.AppHandler):
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
+        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/purchase-followup/run","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -261,6 +266,7 @@ class ExtendedHandler(app_runner.AppHandler):
                 if path=="/api/orders/returns/refund":self.send_json(200,order_returns.record_refund(s,values));return
                 if path=="/api/purchase-advice/drafts":self.send_json(200,orders.create_purchase_advice_drafts(s,values));return
                 if path=="/api/purchase-policy":self.send_json(200,purchase_approvals.save_policy(s,values));return
+                if path=="/api/purchase-followup/run":self.send_json(200,purchase_approvals.run_due_followups(s));return
                 if path=="/api/orders/approve":self.send_json(200,purchase_approvals.decide(s,values,'approve'));return
                 if path=="/api/orders/reject":self.send_json(200,purchase_approvals.decide(s,values,'reject'));return
                 if path=="/api/orders/mail-purchase":self.send_json(200,purchase_approvals.send_order(s,values));return

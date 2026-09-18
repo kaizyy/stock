@@ -139,7 +139,7 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(result["created"][0]["supplier"],"Alternatief")
 
     def test_purchase_budget_requires_and_records_approval(self):
-        purchase_approvals.save_policy(self.session,{"approval_threshold":"0","monthly_budget":"5","price_warning_requires_approval":"1"})
+        purchase_approvals.save_policy(self.session,{"approval_threshold":"0","monthly_budget":"5","price_warning_requires_approval":"1","auto_followup_enabled":"1","confirmation_reminder_days":"1","delay_reminder_days":"2"})
         result=order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2}])})
         self.assertTrue(result["created"][0]["approvalRequired"])
         order=order_management.order_rows(str(self.room_id),"purchase")[0]
@@ -149,6 +149,13 @@ class OrderInventoryTests(unittest.TestCase):
         with patch.object(server,"SMTP_HOST","smtp.example.test"),patch.object(server,"SMTP_PORT",587),patch.object(purchase_approvals.smtplib,"SMTP",return_value=smtp):
             sent=purchase_approvals.send_order(self.session,{"order_id":order["id"],"recipient":"supplier@example.test"})
         self.assertTrue(sent["sent"]);smtp.send_message.assert_called_once()
+        with server.db() as conn:
+            conn.execute("UPDATE orders SET purchase_sent_at=NOW()-INTERVAL '2 days' WHERE id=%s",(order["id"],));conn.commit()
+        reminder_smtp=MagicMock();reminder_smtp.__enter__.return_value=reminder_smtp
+        with patch.object(server,"SMTP_HOST","smtp.example.test"),patch.object(server,"SMTP_PORT",587),patch.object(purchase_approvals.smtplib,"SMTP",return_value=reminder_smtp):
+            followup=purchase_approvals.run_due_followups(self.session)
+        self.assertEqual(len(followup["sent"]),1);reminder_smtp.send_message.assert_called_once()
+        self.assertEqual(purchase_approvals.followup_overview(str(self.room_id))["summary"]["awaiting_confirmation"],1)
         delivery=(date.today()+timedelta(days=10)).isoformat()
         confirmation=purchase_approvals.confirm_delivery(self.session,{"order_id":order["id"],"confirmed_delivery_date":delivery,"confirmation_reference":"BEV-42"})
         self.assertTrue(confirmation["confirmed"])
