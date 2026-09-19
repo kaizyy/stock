@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from datetime import date
 
 import server
 
@@ -166,6 +167,17 @@ def action_center(stockroom_id, role):
             if role in ('owner','admin'):
                 approvals=conn.execute("SELECT id::text,COALESCE(order_number,reference,'Inkooporder') number,relation_name,approval_reason FROM orders WHERE stockroom_id=%s AND order_type='purchase' AND status='pending_approval' ORDER BY created_at",(stockroom_id,)).fetchall()
                 for order in approvals:actions.append({'key':f"purchase-approval:{order['id']}",'severity':'warning','title':'Inkooporder wacht op goedkeuring','detail':f"{order['number']} · {order['relation_name'] or 'Geen leverancier'} · {order['approval_reason']}",'targetView':'orders','actionLabel':'Order beoordelen'})
+            invoice_ready=conn.execute("SELECT to_regclass('public.purchase_invoices') IS NOT NULL AS ready").fetchone()['ready']
+            if invoice_ready:
+                purchase_invoices=conn.execute("""SELECT i.id::text,i.invoice_number,i.due_date,i.status,i.total_amount::float8,i.paid_amount::float8,o.relation_name,
+                    COALESCE((SELECT SUM(c.amount) FROM purchase_invoice_credits c WHERE c.invoice_id=i.id),0)::float8 credited
+                    FROM purchase_invoices i JOIN orders o ON o.id=i.order_id WHERE i.stockroom_id=%s AND i.status NOT IN ('paid','rejected') ORDER BY i.due_date""",(stockroom_id,)).fetchall()
+                for invoice in purchase_invoices:
+                    outstanding=max(0,invoice['total_amount']-invoice['paid_amount']-invoice['credited'])
+                    if invoice['status'] in ('blocked','matched'):
+                        actions.append({'key':f"purchase-invoice-review:{invoice['id']}",'severity':'danger' if invoice['status']=='blocked' else 'warning','title':f"Inkoopfactuur {invoice['invoice_number']} wacht op controle",'detail':f"{invoice['relation_name'] or 'Geen leverancier'} · € {outstanding:.2f} open",'targetView':'finance','actionLabel':'Factuur controleren'})
+                    elif invoice['due_date']<date.today() and outstanding>0.005:
+                        actions.append({'key':f"purchase-invoice-due:{invoice['id']}",'severity':'danger','title':f"Inkoopfactuur {invoice['invoice_number']} is vervallen",'detail':f"{invoice['relation_name'] or 'Geen leverancier'} · € {outstanding:.2f} open",'targetView':'finance','actionLabel':'Betaling bekijken'})
         if can_sales:
             invoices=conn.execute("""SELECT i.order_id::text id,i.invoice_number,i.due_date,o.relation_name
                 FROM invoice_documents i JOIN orders o ON o.id=i.order_id

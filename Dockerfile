@@ -2,6 +2,9 @@ FROM python:3.12-alpine
 
 WORKDIR /app
 
+COPY purchase_invoices.py /app/
+COPY purchase_invoice_ui.js /app/public/
+
 RUN apk add --no-cache curl su-exec postgresql-client \
     && pip install --no-cache-dir "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5"
 

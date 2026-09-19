@@ -11,6 +11,7 @@ import runner
 import dashboard_runner
 import order_management
 import purchase_receipts
+import purchase_invoices
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -36,6 +37,7 @@ class OrderInventoryTests(unittest.TestCase):
         order_management.initialize_order_management()
         purchase_alternatives.initialize()
         purchase_receipts.initialize()
+        purchase_invoices.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
@@ -287,6 +289,30 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertAlmostEqual(state["items"][0]["stock"], 9.9)
         self.assertAlmostEqual(next(t for t in state["transactions"] if t.get("orderId") == sales_id)["qty"], 0.2)
         self.assertAlmostEqual(financial_workflow.reservation_overview(str(self.room_id))[0]["available"], 9.9)
+
+    def test_purchase_invoice_three_way_match_blocks_and_prevents_duplicates(self):
+        supplier_id = order_management.save_relation(self.session, "supplier", {"name": "Factuurleverancier"})
+        order_id = order_management.create_order(self.session, {
+            "order_type": "purchase", "relation_id": supplier_id,
+            "lines_json": json.dumps([{"item_id": self.item_id, "item_name": "Testitem", "sku": "T-1", "quantity": 5, "unit_price": 4}]),
+        })
+        order_management.update_order_status(self.session, "purchase", {"order_id": order_id, "status": "ordered"})
+        line = next(row for row in order_management.order_rows(str(self.room_id), "purchase") if row["id"] == order_id)["lines"][0]
+        purchase_receipts.receive(self.session, {"order_id": order_id, "lines_json": json.dumps([{"line_id": line["id"], "quantity": 4}])})
+        values = {"order_id": order_id, "invoice_number": "SUP-2026-1", "invoice_date": date.today().isoformat(), "due_date": (date.today()+timedelta(days=30)).isoformat(), "lines_json": json.dumps([{"order_line_id": line["id"], "quantity": 5, "unit_price": 4}])}
+        result = purchase_invoices.create(self.session, values)
+        self.assertEqual(result["status"], "blocked")
+        self.assertTrue(any(issue["type"] == "quantity" for issue in result["discrepancies"]))
+        with self.assertRaisesRegex(ValueError, "bestaat al"):
+            purchase_invoices.create(self.session, values)
+        with self.assertRaisesRegex(ValueError, "geblokkeerd"):
+            purchase_invoices.payment(self.session, {"invoice_id": result["id"], "amount": 20})
+        purchase_invoices.decide(self.session, {"invoice_id": result["id"], "dispute_amount": 4}, "dispute")
+        purchase_invoices.credit(self.session, {"invoice_id": result["id"], "credit_number": "CR-1", "amount": 4})
+        purchase_invoices.payment(self.session, {"invoice_id": result["id"], "amount": 12})
+        invoice = purchase_invoices.rows(str(self.room_id))[0]
+        self.assertEqual(invoice["status"], "paid")
+        self.assertEqual(invoice["outstanding"], 0)
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {
