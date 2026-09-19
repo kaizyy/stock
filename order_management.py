@@ -31,6 +31,8 @@ def initialize_order_management():
         conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS free_shipping_threshold NUMERIC(14,2) NOT NULL DEFAULT 0")
         conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS ordering_weekdays TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_days INTEGER NOT NULL DEFAULT 14")
+        conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS iban TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bic TEXT NOT NULL DEFAULT ''")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS customers (
                 id UUID PRIMARY KEY,
@@ -124,7 +126,7 @@ def allowed(role, capability):
 def relation_rows(stockroom_id, kind):
     table = "suppliers" if kind == "supplier" else "customers"
     with server.db() as conn:
-        extra=",minimum_order_amount::float8,free_shipping_threshold::float8,ordering_weekdays,lead_time_days" if kind=="supplier" else ""
+        extra=",minimum_order_amount::float8,free_shipping_threshold::float8,ordering_weekdays,lead_time_days,iban,bic" if kind=="supplier" else ""
         return conn.execute(
             f"SELECT id::text,name,contact_name,email,phone,address,notes{extra},created_at,updated_at FROM {table} WHERE stockroom_id=%s ORDER BY lower(name),created_at",
             (stockroom_id,),
@@ -134,7 +136,7 @@ def relation_rows(stockroom_id, kind):
 def relation_row(stockroom_id, kind, relation_id):
     table = "suppliers" if kind == "supplier" else "customers"
     with server.db() as conn:
-        extra=",minimum_order_amount::float8,free_shipping_threshold::float8,ordering_weekdays,lead_time_days" if kind=="supplier" else ""
+        extra=",minimum_order_amount::float8,free_shipping_threshold::float8,ordering_weekdays,lead_time_days,iban,bic" if kind=="supplier" else ""
         return conn.execute(
             f"SELECT id::text,name,contact_name,email,phone,address,notes{extra},created_at,updated_at FROM {table} WHERE id=%s AND stockroom_id=%s",
             (relation_id, stockroom_id),
@@ -159,7 +161,7 @@ def save_relation(session, kind, values):
         except (TypeError,ValueError):raise ValueError('Controleer de inkoopplanning van de leverancier.')
         if not 1<=lead_days<=365:raise ValueError('Levertijd moet tussen 1 en 365 dagen liggen.')
         weekdays=','.join(dict.fromkeys(day.strip() for day in str(values.get('ordering_weekdays') or '').split(',') if day.strip() in {'1','2','3','4','5','6','7'}))
-        planning=(minimum,free_shipping,weekdays,lead_days)
+        planning=(minimum,free_shipping,weekdays,lead_days,(values.get('iban') or '').replace(' ','').upper()[:34],(values.get('bic') or '').replace(' ','').upper()[:20])
     with server.db() as conn:
         if relation_id:
             row = conn.execute(
@@ -168,14 +170,14 @@ def save_relation(session, kind, values):
             ).fetchone()
             if not row:
                 raise PermissionError("Relatie niet gevonden.")
-            if kind=="supplier":conn.execute("UPDATE suppliers SET minimum_order_amount=%s,free_shipping_threshold=%s,ordering_weekdays=%s,lead_time_days=%s WHERE id=%s AND stockroom_id=%s",(*planning,relation_id,session["stockroom_id"]))
+            if kind=="supplier":conn.execute("UPDATE suppliers SET minimum_order_amount=%s,free_shipping_threshold=%s,ordering_weekdays=%s,lead_time_days=%s,iban=%s,bic=%s WHERE id=%s AND stockroom_id=%s",(*planning,relation_id,session["stockroom_id"]))
         else:
             relation_id = str(uuid.uuid4())
             conn.execute(
                 f"INSERT INTO {table}(id,stockroom_id,name,contact_name,email,phone,address,notes) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
                 (relation_id, session["stockroom_id"], name, *payload),
             )
-            if kind=="supplier":conn.execute("UPDATE suppliers SET minimum_order_amount=%s,free_shipping_threshold=%s,ordering_weekdays=%s,lead_time_days=%s WHERE id=%s",(*planning,relation_id))
+            if kind=="supplier":conn.execute("UPDATE suppliers SET minimum_order_amount=%s,free_shipping_threshold=%s,ordering_weekdays=%s,lead_time_days=%s,iban=%s,bic=%s WHERE id=%s",(*planning,relation_id))
         conn.execute(
             "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
             (session["stockroom_id"], session["user_id"], f"{kind}.saved", json.dumps({"id": relation_id, "name": name})),

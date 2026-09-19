@@ -12,6 +12,7 @@ import order_management as orders
 import order_delete
 import purchase_receipts
 import purchase_invoices
+import payment_batches
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -184,6 +185,17 @@ class ExtendedHandler(app_runner.AppHandler):
                 data,name,mime=purchase_invoices.attachment(s['stockroom_id'],parse_qs(parsed.query).get('id',[''])[0]);self.send_response(200);self.send_header('Content-Type',mime);self.send_header('Content-Disposition',f'inline; filename="{name.replace(chr(34),"")}"');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
             except ValueError as exc:self.send_json(404,{"error":str(exc)})
             return
+        if path=="/api/payment-batches":
+            s=self.require_session(api=True)
+            if s:self.send_json(200,payment_batches.overview(s['stockroom_id']))
+            return
+        if path=="/api/payment-batches/sepa":
+            s=self.require_session(api=True)
+            if not s:return
+            try:
+                data,name=payment_batches.sepa(s,parse_qs(parsed.query).get('id',[''])[0]);self.send_response(200);self.send_header('Content-Type','application/xml; charset=utf-8');self.send_header('Content-Disposition',f'attachment; filename="{name}"');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+            except (ValueError,PermissionError) as exc:self.send_json(400,{"error":str(exc)})
+            return
         if path=="/api/purchase-followup":
             s=self.require_session(api=True)
             if not s:return
@@ -265,6 +277,7 @@ class ExtendedHandler(app_runner.AppHandler):
             return
         handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/receipt/action","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/purchase-followup/run","/api/purchase-alternatives/create","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/orders/portal/create","/api/orders/portal/revoke","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         handled.update({"/api/purchase-invoice-policy","/api/purchase-invoices","/api/purchase-invoices/approve","/api/purchase-invoices/reject","/api/purchase-invoices/dispute","/api/purchase-invoices/payment","/api/purchase-invoices/credit"})
+        handled.update({"/api/payment-settings","/api/payment-batches","/api/payment-batches/approve","/api/payment-batches/cancel","/api/payment-batches/process"})
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -278,6 +291,11 @@ class ExtendedHandler(app_runner.AppHandler):
                 if path=="/api/purchase-invoices/dispute":self.send_json(200,purchase_invoices.decide(s,values,'dispute'));return
                 if path=="/api/purchase-invoices/payment":self.send_json(200,purchase_invoices.payment(s,values));return
                 if path=="/api/purchase-invoices/credit":self.send_json(200,purchase_invoices.credit(s,values));return
+                if path=="/api/payment-settings":self.send_json(200,payment_batches.save_settings(s,values));return
+                if path=="/api/payment-batches":self.send_json(200,payment_batches.create(s,values));return
+                if path=="/api/payment-batches/approve":self.send_json(200,payment_batches.change(s,values,'approve'));return
+                if path=="/api/payment-batches/cancel":self.send_json(200,payment_batches.change(s,values,'cancel'));return
+                if path=="/api/payment-batches/process":self.send_json(200,payment_batches.process(s,values));return
                 if path=="/api/account/sessions/revoke":
                     token=self.cookie_token();current=server.token_digest(token) if token else None;self.send_json(200,account_tools.revoke_session(s,values.get('session_id') or '',current,str(values.get('all_others') or '')=='1'));return
                 if path=="/api/account/notification-preferences":self.send_json(200,account_tools.save_preferences(s,values));return
@@ -351,5 +369,5 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();payment_batches.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()

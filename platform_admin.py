@@ -192,6 +192,10 @@ def action_center(stockroom_id, role):
                 FROM inventory_reservations r JOIN orders o ON o.id=r.order_id WHERE r.stockroom_id=%s AND r.created_at<NOW()-INTERVAL '14 days' GROUP BY r.order_id,o.order_number,o.reference
                 UNION ALL SELECT 'quote',r.quote_id::text,q.quote_number,MIN(r.created_at) FROM quote_reservations r JOIN quotes q ON q.id=r.quote_id WHERE r.stockroom_id=%s AND r.created_at<NOW()-INTERVAL '14 days' GROUP BY r.quote_id,q.quote_number""",(stockroom_id,stockroom_id)).fetchall()
             for reservation in reservations:actions.append({'key':f"reservation:{reservation['kind']}:{reservation['id']}",'severity':'warning','title':'Reservering staat lang open','detail':f"{reservation['label']} · ouder dan 14 dagen",'targetView':'inventory','actionLabel':'Reservering bekijken'})
+        batches_ready=conn.execute("SELECT to_regclass('public.payment_batches') IS NOT NULL AS ready").fetchone()['ready']
+        if batches_ready and role in ('owner','admin'):
+            pending_batches=conn.execute("SELECT id::text,batch_number,status,execution_date FROM payment_batches WHERE stockroom_id=%s AND status IN ('draft','exported') ORDER BY execution_date",(stockroom_id,)).fetchall()
+            for batch in pending_batches:actions.append({'key':f"payment-batch:{batch['id']}",'severity':'warning','title':f"Betaalbatch {batch['batch_number']} vraagt actie",'detail':'Wacht op goedkeuring' if batch['status']=='draft' else 'SEPA geëxporteerd · bevestig verwerking na uitvoering door de bank','targetView':'finance','actionLabel':'Betaalbatch bekijken'})
     rank={'danger':0,'warning':1,'info':2}
     actions.sort(key=lambda action:(rank.get(action['severity'],3),action['title']))
     return actions[:100]

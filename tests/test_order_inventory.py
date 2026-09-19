@@ -12,6 +12,7 @@ import dashboard_runner
 import order_management
 import purchase_receipts
 import purchase_invoices
+import payment_batches
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -38,6 +39,7 @@ class OrderInventoryTests(unittest.TestCase):
         purchase_alternatives.initialize()
         purchase_receipts.initialize()
         purchase_invoices.initialize()
+        payment_batches.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
@@ -313,6 +315,26 @@ class OrderInventoryTests(unittest.TestCase):
         invoice = purchase_invoices.rows(str(self.room_id))[0]
         self.assertEqual(invoice["status"], "paid")
         self.assertEqual(invoice["outstanding"], 0)
+
+    def test_payment_batch_exports_sepa_and_books_once(self):
+        supplier_id = order_management.save_relation(self.session, "supplier", {"name": "SEPA leverancier", "iban": "NL91ABNA0417164300", "bic": "ABNANL2A"})
+        order_id = order_management.create_order(self.session, {"order_type": "purchase", "relation_id": supplier_id, "lines_json": json.dumps([{"item_id": self.item_id, "item_name": "Testitem", "sku": "T-1", "quantity": 2, "unit_price": 4}])})
+        order_management.update_order_status(self.session, "purchase", {"order_id": order_id, "status": "ordered"})
+        line = next(row for row in order_management.order_rows(str(self.room_id), "purchase") if row["id"] == order_id)["lines"][0]
+        purchase_receipts.receive(self.session, {"order_id": order_id, "lines_json": json.dumps([{"line_id": line["id"], "quantity": 2}])})
+        invoice = purchase_invoices.create(self.session, {"order_id": order_id, "invoice_number": "SEPA-1", "invoice_date": date.today().isoformat(), "due_date": date.today().isoformat(), "lines_json": json.dumps([{"order_line_id": line["id"], "quantity": 2, "unit_price": 4}])})
+        purchase_invoices.decide(self.session, {"invoice_id": invoice["id"]}, "approve")
+        payment_batches.save_settings(self.session, {"account_name": "Test BV", "iban": "NL91ABNA0417164300", "bic": "ABNANL2A"})
+        batch = payment_batches.create(self.session, {"invoice_ids": json.dumps([invoice["id"]]), "execution_date": date.today().isoformat()})
+        self.assertEqual(payment_batches.candidates(str(self.room_id)), [])
+        payment_batches.change(self.session, {"batch_id": batch["id"]}, "approve")
+        xml, filename = payment_batches.sepa(self.session, batch["id"])
+        self.assertIn(b"CstmrCdtTrfInitn", xml);self.assertTrue(filename.endswith(".xml"))
+        result = payment_batches.process(self.session, {"batch_id": batch["id"]})
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(purchase_invoices.rows(str(self.room_id))[0]["status"], "paid")
+        with self.assertRaisesRegex(ValueError, "Exporteer"):
+            payment_batches.process(self.session, {"batch_id": batch["id"]})
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {
