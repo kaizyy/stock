@@ -24,6 +24,8 @@ def initialize():
             creditor_iban TEXT NOT NULL,creditor_bic TEXT NOT NULL DEFAULT '',reference TEXT NOT NULL,UNIQUE(batch_id,invoice_id))""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_batches_room ON payment_batches(stockroom_id,created_at DESC)")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_batch_invoice_once ON payment_batch_items(invoice_id)")
+        conn.execute("ALTER TABLE payment_batch_items DROP CONSTRAINT IF EXISTS payment_batch_items_invoice_id_fkey")
+        conn.execute("ALTER TABLE payment_batch_items ADD CONSTRAINT payment_batch_items_invoice_id_fkey FOREIGN KEY(invoice_id) REFERENCES purchase_invoices(id) ON DELETE CASCADE")
         conn.commit()
 
 
@@ -105,7 +107,8 @@ def change(session, values, action):
         if not current or current['status']!='draft':raise ValueError('Alleen een conceptbatch kan worden goedgekeurd of geannuleerd.')
         count=conn.execute("SELECT COUNT(*) n FROM payment_batch_items WHERE batch_id=%s",(batch_id,)).fetchone()['n']
         if target=='approved' and not count:raise ValueError('Een lege batch kan niet worden goedgekeurd.')
-        conn.execute("UPDATE payment_batches SET status=%s,approved_by=CASE WHEN %s='approved' THEN %s ELSE NULL END,approved_at=CASE WHEN %s='approved' THEN NOW() ELSE NULL END WHERE id=%s",(target,target,session['user_id'],target,batch_id))
+        if target=='approved':conn.execute("UPDATE payment_batches SET status='approved',approved_by=%s,approved_at=NOW() WHERE id=%s",(session['user_id'],batch_id))
+        else:conn.execute("UPDATE payment_batches SET status='cancelled',approved_by=NULL,approved_at=NULL WHERE id=%s",(batch_id,))
         if target=='cancelled':conn.execute("DELETE FROM payment_batch_items WHERE batch_id=%s",(batch_id,))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",(session['stockroom_id'],session['user_id'],f'payment_batch.{target}',json.dumps({'id':batch_id})));conn.commit()
     return {'updated':True,'status':target}
