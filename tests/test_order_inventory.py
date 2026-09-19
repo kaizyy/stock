@@ -15,6 +15,7 @@ import order_returns
 import purchase_intelligence
 import purchase_approvals
 import supplier_portal
+import purchase_alternatives
 import business_tools
 import billing
 import documents_v3
@@ -33,6 +34,7 @@ class OrderInventoryTests(unittest.TestCase):
         runner.migrate_roles()
         dashboard_runner.initialize_enhancements()
         order_management.initialize_order_management()
+        purchase_alternatives.initialize()
         purchase_receipts.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
@@ -142,6 +144,24 @@ class OrderInventoryTests(unittest.TestCase):
             order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second}])})
         result=order_management.create_purchase_advice_drafts(self.session,{"lines_json":json.dumps([{"item_id":self.item_id,"quantity":2,"supplier_id":second,"override_reason":"Contractuele afspraak"}])})
         self.assertEqual(result["created"][0]["supplier"],"Alternatief")
+
+    def test_supplier_shortage_creates_alternative_without_double_ordering(self):
+        first=order_management.save_relation(self.session,"supplier",{"name":"Leverancier A"})
+        second=order_management.save_relation(self.session,"supplier",{"name":"Leverancier B","lead_time_days":"4"})
+        historical=order_management.create_order(self.session,{"order_type":"purchase","relation_id":second,"lines_json":json.dumps([{"item_id":self.item_id,"item_name":"Testitem","sku":"T-1","quantity":1,"unit_price":3.75}] )})
+        order_management.update_order_status(self.session,"purchase",{"order_id":historical,"status":"ordered"})
+        history_line=order_management.order_rows(str(self.room_id),"purchase")[0]["lines"][0]
+        purchase_receipts.receive(self.session,{"order_id":historical,"lines_json":json.dumps([{"line_id":history_line["id"],"quantity":1}])})
+        original=order_management.create_order(self.session,{"order_type":"purchase","relation_id":first,"lines_json":json.dumps([{"item_id":self.item_id,"item_name":"Testitem","sku":"T-1","quantity":5,"unit_price":4}])})
+        order_management.update_order_status(self.session,"purchase",{"order_id":original,"status":"ordered"})
+        original_order=next(row for row in order_management.order_rows(str(self.room_id),"purchase") if row["id"]==original);line=original_order["lines"][0]
+        link=supplier_portal.issue(self.session,original,"https://stock.example.test");token=parse_qs(urlparse(link["url"]).query)["token"][0]
+        supplier_portal.submit(token,{"confirmed_delivery_date":(date.today()+timedelta(days=12)).isoformat(),f"availability_{line['id']}":"partial",f"quantity_{line['id']}":"2"})
+        options=purchase_alternatives.overview(self.session,original);self.assertEqual(options["shortages"][0]["shortage"],3);self.assertEqual(options["shortages"][0]["alternatives"][0]["supplierId"],second)
+        result=purchase_alternatives.create(self.session,{"line_id":line["id"],"supplier_id":second});self.assertEqual(result["quantity"],3)
+        refreshed=next(row for row in order_management.order_rows(str(self.room_id),"purchase") if row["id"]==original);self.assertEqual(refreshed["lines"][0]["supplier_cancelled_quantity"],3)
+        supplement=next(row for row in order_management.order_rows(str(self.room_id),"purchase") if row["id"]==result["orderId"]);self.assertEqual(supplement["lines"][0]["quantity"],3);self.assertEqual(supplement["lines"][0]["source_order_line_id"],line["id"])
+        self.assertEqual(order_management.open_purchase_quantities(str(self.room_id))[self.item_id],5)
 
     def test_purchase_budget_requires_and_records_approval(self):
         purchase_approvals.save_policy(self.session,{"approval_threshold":"0","monthly_budget":"5","price_warning_requires_approval":"1","auto_followup_enabled":"1","confirmation_reminder_days":"1","delay_reminder_days":"2"})

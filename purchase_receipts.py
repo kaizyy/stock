@@ -56,7 +56,7 @@ def receive(session, values):
         order=conn.execute("SELECT id,status,relation_name,reference FROM orders WHERE id=%s AND stockroom_id=%s AND order_type='purchase' FOR UPDATE",(order_id,session['stockroom_id'])).fetchone()
         if not order:raise PermissionError('Inkooporder niet gevonden.')
         if order['status'] not in ('ordered','partial'):raise ValueError('Zet de order eerst op Besteld voordat je een ontvangst boekt.')
-        lines=conn.execute("""SELECT id::text,item_id,item_name,quantity::float8,fulfilled_quantity::float8,unit_price::float8
+        lines=conn.execute("""SELECT id::text,item_id,item_name,quantity::float8,fulfilled_quantity::float8,supplier_cancelled_quantity::float8,unit_price::float8
             FROM order_lines WHERE order_id=%s ORDER BY created_at,id FOR UPDATE""",(order_id,)).fetchall()
         line_map={line['id']:line for line in lines};room=conn.execute("SELECT state FROM stockrooms WHERE id=%s FOR UPDATE",(session['stockroom_id'],)).fetchone();state=room['state']
         receipt_id=str(uuid.uuid4());changes=[]
@@ -64,7 +64,7 @@ def receive(session, values):
         for line_id,quantity in requested.items():
             line=line_map.get(line_id)
             if not line:raise ValueError('Een orderregel bestaat niet meer.')
-            remaining=float(line['quantity'])-float(line['fulfilled_quantity'])
+            remaining=float(line['quantity'])-float(line['fulfilled_quantity'])-float(line['supplier_cancelled_quantity'])
             if quantity>remaining+0.0005:raise ValueError(f"Van {line['item_name']} staan nog {remaining:g} open.")
             item=next((item for item in state.get('items',[]) if str(item.get('id'))==str(line['item_id'])),None)
             if not item:raise ValueError(f"Artikel bestaat niet meer: {line['item_name']}")
@@ -75,7 +75,7 @@ def receive(session, values):
             changes.append({'itemId':str(line['item_id']),'quantity':quantity})
         inventory_ledger.set_context(conn,'purchase_order_receipt',reference or receipt_id)
         conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",(json.dumps(state,ensure_ascii=False),session['stockroom_id']))
-        remaining=conn.execute("SELECT COALESCE(SUM(quantity-fulfilled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s",(order_id,)).fetchone()['remaining']
+        remaining=conn.execute("SELECT COALESCE(SUM(quantity-fulfilled_quantity-supplier_cancelled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s",(order_id,)).fetchone()['remaining']
         status='received' if remaining<=0.0005 else 'partial';conn.execute("UPDATE orders SET status=%s,inventory_booked_at=COALESCE(inventory_booked_at,NOW()),updated_at=NOW() WHERE id=%s",(status,order_id))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.received',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'orderId':order_id,'receiptId':receipt_id,'reference':reference,'changes':changes,'status':status})))
         conn.commit()
@@ -98,8 +98,7 @@ def reverse(session, values):
         state['transactions']=[tx for tx in state.get('transactions',[]) if str(tx.get('receiptId') or '')!=receipt_id]
         inventory_ledger.set_context(conn,'purchase_receipt_reversed',receipt['reference'] or receipt_id)
         conn.execute("UPDATE stockrooms SET state=%s::jsonb,updated_at=NOW() WHERE id=%s",(json.dumps(state,ensure_ascii=False),session['stockroom_id']))
-        fulfilled=conn.execute("SELECT COALESCE(SUM(fulfilled_quantity),0)::float8 done,COALESCE(SUM(quantity-fulfilled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s",(receipt['order_id'],)).fetchone();status='ordered' if fulfilled['done']<=0.0005 else 'partial' if fulfilled['remaining']>0.0005 else 'received'
+        fulfilled=conn.execute("SELECT COALESCE(SUM(fulfilled_quantity),0)::float8 done,COALESCE(SUM(quantity-fulfilled_quantity-supplier_cancelled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s",(receipt['order_id'],)).fetchone();status='ordered' if fulfilled['done']<=0.0005 else 'partial' if fulfilled['remaining']>0.0005 else 'received'
         conn.execute("UPDATE purchase_receipts SET reversed_at=NOW(),reversed_by=%s WHERE id=%s",(session['user_id'],receipt_id));conn.execute("UPDATE orders SET status=%s,inventory_booked_at=CASE WHEN %s='ordered' THEN NULL ELSE inventory_booked_at END,updated_at=NOW() WHERE id=%s",(status,status,receipt['order_id']))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.receipt_reversed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'orderId':str(receipt['order_id']),'receiptId':receipt_id,'status':status})));conn.commit()
     return {'reversed':True,'status':status}
-

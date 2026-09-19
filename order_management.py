@@ -92,6 +92,8 @@ def initialize_order_management():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id)")
+        conn.execute("ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS supplier_cancelled_quantity NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK(supplier_cancelled_quantity>=0 AND supplier_cancelled_quantity<=quantity)")
+        conn.execute("ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS source_order_line_id UUID REFERENCES order_lines(id) ON DELETE SET NULL")
         conn.execute("""CREATE TABLE IF NOT EXISTS inventory_reservations(
             order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
             stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,
@@ -224,7 +226,7 @@ def order_rows(stockroom_id, order_type):
         ).fetchall()
         for order in rows:
             order["lines"] = conn.execute(
-                """SELECT l.id::text,l.item_id,l.item_name,l.sku,l.quantity::float8,l.unit_price::float8,l.fulfilled_quantity::float8,
+                """SELECT l.id::text,l.item_id,l.item_name,l.sku,l.quantity::float8,l.unit_price::float8,l.fulfilled_quantity::float8,l.supplier_cancelled_quantity::float8,l.source_order_line_id::text,
                    r.availability supplier_availability,r.available_quantity::float8 supplier_available_quantity,r.note supplier_response_note
                    FROM order_lines l LEFT JOIN supplier_portal_line_responses r ON r.order_line_id=l.id WHERE l.order_id=%s ORDER BY l.created_at,l.id""",
                 (order["id"],),
@@ -235,7 +237,7 @@ def order_rows(stockroom_id, order_type):
 
 def open_purchase_quantities(stockroom_id):
     with server.db() as conn:
-        rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity),0)::float8 quantity
+        rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity-l.supplier_cancelled_quantity),0)::float8 quantity
             FROM order_lines l JOIN orders o ON o.id=l.order_id
             WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('draft','ordered','partial')
             GROUP BY l.item_id""", (stockroom_id,)).fetchall()
@@ -348,7 +350,7 @@ def create_purchase_advice_drafts(session, values):
         room = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (session["stockroom_id"],)).fetchone()
         state = (room or {}).get("state") or {"items": []}
         items = {str(item.get("id")): item for item in state.get("items", []) if not item.get("archived")}
-        open_rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity),0)::float8 quantity
+        open_rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity-l.supplier_cancelled_quantity),0)::float8 quantity
             FROM order_lines l JOIN orders o ON o.id=l.order_id
             WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('draft','ordered','partial')
             GROUP BY l.item_id""", (session["stockroom_id"],)).fetchall()
@@ -593,7 +595,7 @@ def _book_inventory(conn, session, order, lines, state):
         (json.dumps(state, ensure_ascii=False), session["stockroom_id"]),
     )
     conn.execute(
-        "UPDATE order_lines SET fulfilled_quantity=quantity WHERE order_id=%s",
+        "UPDATE order_lines SET fulfilled_quantity=quantity-supplier_cancelled_quantity WHERE order_id=%s",
         (order["id"],),
     )
     conn.execute(
@@ -643,7 +645,7 @@ def update_order_status(session, expected_type, values):
         already_booked = order["inventory_booked_at"] is not None
         if already_booked:
             if expected_type == "purchase":
-                remaining = conn.execute("SELECT COALESCE(SUM(quantity-fulfilled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s", (order_id,)).fetchone()["remaining"]
+                remaining = conn.execute("SELECT COALESCE(SUM(quantity-fulfilled_quantity-supplier_cancelled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s", (order_id,)).fetchone()["remaining"]
                 if status != order["status"] or (status == "received" and remaining > 0.0005):
                     raise ValueError("De orderstatus wordt automatisch bepaald door de geregistreerde ontvangsten.")
             if expected_type == "sales" and status not in {"completed", "paid"}:
@@ -662,7 +664,7 @@ def update_order_status(session, expected_type, values):
             if not room:
                 raise PermissionError("Stockroom niet gevonden.")
             lines = conn.execute(
-                """SELECT item_id,item_name,sku,quantity::float8,unit_price::float8
+                """SELECT item_id,item_name,sku,(quantity-supplier_cancelled_quantity)::float8 quantity,unit_price::float8
                    FROM order_lines WHERE order_id=%s ORDER BY created_at,id""",
                 (order_id,),
             ).fetchall()
