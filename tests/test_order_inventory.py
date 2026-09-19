@@ -104,7 +104,7 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(state["items"][0]["stock"], 15)
 
     def test_purchase_advice_groups_supplier_and_prevents_duplicate_draft(self):
-        supplier_id = order_management.save_relation(self.session, "supplier", {"name":"Supply BV", "email":"inkoop@example.test"})
+        supplier_id = order_management.save_relation(self.session, "supplier", {"name":"Supply BV", "email":"inkoop@example.test","minimum_order_amount":"100","free_shipping_threshold":"50","ordering_weekdays":str(date.today().isoweekday()),"lead_time_days":"5"})
         with server.db() as conn:
             state = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (self.room_id,)).fetchone()["state"]
             state["items"][0]["supplier"] = "Supply BV"
@@ -119,6 +119,9 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(order["status"], "draft")
         self.assertEqual(order["lines"][0]["quantity"], 8)
         self.assertIsNotNone(order["expected_delivery_date"])
+        self.assertEqual(str(order["expected_delivery_date"]),(date.today()+timedelta(days=5)).isoformat())
+        self.assertEqual(order["advice_details"]["planning"]["minimumOrderAmount"],100.0)
+        self.assertEqual(len(order["advice_details"]["planning"]["warnings"]),2)
         self.assertEqual(order["advice_details"]["source"],"purchase_advice")
         self.assertEqual(order_management.open_purchase_quantities(str(self.room_id))[self.item_id], 8)
         with self.assertRaisesRegex(ValueError, "voldoende open"):

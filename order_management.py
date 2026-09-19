@@ -27,6 +27,10 @@ def initialize_order_management():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_suppliers_stockroom_name ON suppliers(stockroom_id,name)")
+        conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS minimum_order_amount NUMERIC(14,2) NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS free_shipping_threshold NUMERIC(14,2) NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS ordering_weekdays TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_days INTEGER NOT NULL DEFAULT 14")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS customers (
                 id UUID PRIMARY KEY,
@@ -118,8 +122,9 @@ def allowed(role, capability):
 def relation_rows(stockroom_id, kind):
     table = "suppliers" if kind == "supplier" else "customers"
     with server.db() as conn:
+        extra=",minimum_order_amount::float8,free_shipping_threshold::float8,ordering_weekdays,lead_time_days" if kind=="supplier" else ""
         return conn.execute(
-            f"SELECT id::text,name,contact_name,email,phone,address,notes,created_at,updated_at FROM {table} WHERE stockroom_id=%s ORDER BY lower(name),created_at",
+            f"SELECT id::text,name,contact_name,email,phone,address,notes{extra},created_at,updated_at FROM {table} WHERE stockroom_id=%s ORDER BY lower(name),created_at",
             (stockroom_id,),
         ).fetchall()
 
@@ -127,8 +132,9 @@ def relation_rows(stockroom_id, kind):
 def relation_row(stockroom_id, kind, relation_id):
     table = "suppliers" if kind == "supplier" else "customers"
     with server.db() as conn:
+        extra=",minimum_order_amount::float8,free_shipping_threshold::float8,ordering_weekdays,lead_time_days" if kind=="supplier" else ""
         return conn.execute(
-            f"SELECT id::text,name,contact_name,email,phone,address,notes,created_at,updated_at FROM {table} WHERE id=%s AND stockroom_id=%s",
+            f"SELECT id::text,name,contact_name,email,phone,address,notes{extra},created_at,updated_at FROM {table} WHERE id=%s AND stockroom_id=%s",
             (relation_id, stockroom_id),
         ).fetchone()
 
@@ -145,6 +151,13 @@ def save_relation(session, kind, values):
     if not name:
         name = "Naamloze leverancier" if kind == "supplier" else "Naamloze klant"
     name = name[:200]
+    planning=()
+    if kind=="supplier":
+        try:minimum=max(0,round(float(values.get('minimum_order_amount') or 0),2));free_shipping=max(0,round(float(values.get('free_shipping_threshold') or 0),2));lead_days=int(values.get('lead_time_days') or 14)
+        except (TypeError,ValueError):raise ValueError('Controleer de inkoopplanning van de leverancier.')
+        if not 1<=lead_days<=365:raise ValueError('Levertijd moet tussen 1 en 365 dagen liggen.')
+        weekdays=','.join(dict.fromkeys(day.strip() for day in str(values.get('ordering_weekdays') or '').split(',') if day.strip() in {'1','2','3','4','5','6','7'}))
+        planning=(minimum,free_shipping,weekdays,lead_days)
     with server.db() as conn:
         if relation_id:
             row = conn.execute(
@@ -153,12 +166,14 @@ def save_relation(session, kind, values):
             ).fetchone()
             if not row:
                 raise PermissionError("Relatie niet gevonden.")
+            if kind=="supplier":conn.execute("UPDATE suppliers SET minimum_order_amount=%s,free_shipping_threshold=%s,ordering_weekdays=%s,lead_time_days=%s WHERE id=%s AND stockroom_id=%s",(*planning,relation_id,session["stockroom_id"]))
         else:
             relation_id = str(uuid.uuid4())
             conn.execute(
                 f"INSERT INTO {table}(id,stockroom_id,name,contact_name,email,phone,address,notes) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
                 (relation_id, session["stockroom_id"], name, *payload),
             )
+            if kind=="supplier":conn.execute("UPDATE suppliers SET minimum_order_amount=%s,free_shipping_threshold=%s,ordering_weekdays=%s,lead_time_days=%s WHERE id=%s",(*planning,relation_id))
         conn.execute(
             "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
             (session["stockroom_id"], session["user_id"], f"{kind}.saved", json.dumps({"id": relation_id, "name": name})),
@@ -337,7 +352,7 @@ def create_purchase_advice_drafts(session, values):
             WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('draft','ordered','partial')
             GROUP BY l.item_id""", (session["stockroom_id"],)).fetchall()
         open_by_id = {str(row["item_id"]): float(row["quantity"] or 0) for row in open_rows}
-        suppliers = conn.execute("SELECT id::text,name FROM suppliers WHERE stockroom_id=%s", (session["stockroom_id"],)).fetchall()
+        suppliers = conn.execute("SELECT id::text,name,minimum_order_amount::float8,free_shipping_threshold::float8,ordering_weekdays,lead_time_days FROM suppliers WHERE stockroom_id=%s", (session["stockroom_id"],)).fetchall()
         supplier_by_name = {row["name"].strip().casefold(): row for row in suppliers}
         groups = {}
         skipped = []
@@ -358,13 +373,17 @@ def create_purchase_advice_drafts(session, values):
             if selection['supplier_id'] and not supplier:raise PermissionError('Geselecteerde leverancier hoort niet bij deze stockroom.')
             if supplier and recommended.get('supplierId') and supplier['id']!=str(recommended['supplierId']) and not selection['override_reason']:raise ValueError(f"Vul een reden in om voor {item.get('name') or 'dit artikel'} af te wijken van de geadviseerde leverancier.")
             key = supplier["id"] if supplier else "name:" + (supplier_name or "Niet gekoppeld")
-            metric=supplier_metrics.get((supplier or {}).get('id'));lead_days=max(1,round(float((metric or {}).get('avgLeadDays') or 14)))
+            metric=supplier_metrics.get((supplier or {}).get('id'));lead_days=max(1,int((supplier or {}).get('lead_time_days') or round(float((metric or {}).get('avgLeadDays') or 14))))
+            weekdays=[int(day) for day in str((supplier or {}).get('ordering_weekdays') or '').split(',') if day.isdigit() and 1<=int(day)<=7]
+            wait_days=min(((day-server.date.today().isoweekday())%7 for day in weekdays),default=0)
             chosen=next((option for option in advice.get('alternatives',[]) if str(option.get('supplierId') or '')==str((supplier or {}).get('id') or '')),None)
             if chosen is None and (not supplier or str((supplier or {}).get('id') or '')==str(recommended.get('supplierId') or '')):chosen=recommended
             chosen=chosen or {}
             price=float((chosen or {}).get('latestPrice') or item.get('buy') or 0);change=(chosen or {}).get('priceChange');warning=bool(change is not None and change>=10)
             group = groups.setdefault(key, {"relation_id": supplier["id"] if supplier else None,
-                "relation_name": supplier["name"] if supplier else supplier_name or "Niet gekoppeld", "lead_days":lead_days,"warnings":[],"overrides":[],"lines": []})
+                "relation_name": supplier["name"] if supplier else supplier_name or "Niet gekoppeld", "lead_days":lead_days,"wait_days":wait_days,
+                "minimum_order_amount":float((supplier or {}).get('minimum_order_amount') or 0),"free_shipping_threshold":float((supplier or {}).get('free_shipping_threshold') or 0),
+                "ordering_weekdays":weekdays,"warnings":[],"overrides":[],"lines": []})
             if warning:group['warnings'].append(f"{item.get('name') or 'Artikel'}: prijs {change:+g}%")
             if selection['override_reason']:group['overrides'].append({'itemId':item_id,'reason':selection['override_reason']})
             group["lines"].append((item_id, item.get("name") or "Artikel", item.get("sku") or "", quantity, price))
@@ -373,17 +392,21 @@ def create_purchase_advice_drafts(session, values):
         reference = "Besteladvies " + server.date.today().isoformat()
         for group in groups.values():
             order_id = str(uuid.uuid4())
-            details={'source':'purchase_advice','supplierScore':(supplier_metrics.get(str(group['relation_id'])) or {}).get('score'),'priceWarnings':group['warnings'],'overrides':group['overrides']}
+            order_total=sum(line[3]*line[4] for line in group['lines']);planning_warnings=[]
+            if group['minimum_order_amount'] and order_total<group['minimum_order_amount']:planning_warnings.append(f"Nog € {group['minimum_order_amount']-order_total:.2f} tot minimumorder")
+            if group['free_shipping_threshold'] and order_total<group['free_shipping_threshold']:planning_warnings.append(f"Nog € {group['free_shipping_threshold']-order_total:.2f} tot gratis verzending")
+            details={'source':'purchase_advice','supplierScore':(supplier_metrics.get(str(group['relation_id'])) or {}).get('score'),'priceWarnings':group['warnings'],'overrides':group['overrides'],
+                'planning':{'orderTotal':round(order_total,2),'minimumOrderAmount':group['minimum_order_amount'],'freeShippingThreshold':group['free_shipping_threshold'],'orderingWeekdays':group['ordering_weekdays'],'waitDays':group['wait_days'],'leadTimeDays':group['lead_days'],'warnings':planning_warnings}}
             notes="Automatisch concept vanuit voorraadprognose."+(" Prijscontrole nodig: "+"; ".join(group['warnings']) if group['warnings'] else "")
             conn.execute("""INSERT INTO orders(id,stockroom_id,order_type,relation_id,relation_name,status,reference,notes,order_date,expected_delivery_date,advice_details,created_by)
                 VALUES(%s,%s,'purchase',%s,%s,'draft',%s,%s,CURRENT_DATE,CURRENT_DATE+(%s * INTERVAL '1 day'),%s::jsonb,%s)""", (order_id, session["stockroom_id"],
-                group["relation_id"], group["relation_name"], reference, notes,group['lead_days'],json.dumps(details), session["user_id"]))
+                group["relation_id"], group["relation_name"], reference, notes,group['lead_days']+group['wait_days'],json.dumps(details), session["user_id"]))
             for item_id, item_name, sku, quantity, price in group["lines"]:
                 conn.execute("INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                              (str(uuid.uuid4()), order_id, item_id, item_name, sku, quantity, price))
             approval=purchase_approvals.evaluate(conn,session['stockroom_id'],order_id)
             if approval['required']:conn.execute("UPDATE orders SET status='pending_approval',approval_status='pending',approval_reason=%s WHERE id=%s",('; '.join(approval['reasons']),order_id))
-            created.append({"id": order_id, "supplier": group["relation_name"], "lines": len(group["lines"]),"expectedDeliveryDays":group['lead_days'],"priceWarnings":group['warnings'],"approvalRequired":approval['required'],"approvalReasons":approval['reasons']})
+            created.append({"id": order_id, "supplier": group["relation_name"], "lines": len(group["lines"]),"expectedDeliveryDays":group['lead_days']+group['wait_days'],"orderTotal":round(order_total,2),"planningWarnings":planning_warnings,"priceWarnings":group['warnings'],"approvalRequired":approval['required'],"approvalReasons":approval['reasons']})
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase_advice.drafts_created',%s::jsonb)",
                      (session["stockroom_id"], session["user_id"], json.dumps({"orders": created, "skippedItems": skipped})))
         conn.commit()
