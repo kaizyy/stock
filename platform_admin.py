@@ -156,11 +156,13 @@ def action_center(stockroom_id, role):
                 WHERE o.stockroom_id=%s AND r.availability IN ('partial','unavailable') ORDER BY o.created_at""",(stockroom_id,)).fetchall()
             for shortage in shortages:
                 if shortage['shortage']>0.0005:actions.append({'key':f"supplier-shortage:{shortage['id']}:{shortage['item_name']}",'severity':'danger','title':'Leverancierstekort oplossen','detail':f"{shortage['number']} · {shortage['item_name']} · {shortage['shortage']:g} tekort",'targetView':'orders','actionLabel':'Alternatieven bekijken'})
-            receipt_issues=conn.execute("""SELECT DISTINCT r.id::text,COALESCE(o.order_number,o.reference,'Inkooporder') number,r.reference
-                FROM purchase_receipts r JOIN orders o ON o.id=r.order_id LEFT JOIN purchase_receipt_lines l ON l.receipt_id=r.id
-                WHERE r.stockroom_id=%s AND r.reversed_at IS NULL AND (l.discrepancy_code<>'match' OR jsonb_array_length(r.unexpected_items)>0)
-                AND NOT EXISTS(SELECT 1 FROM purchase_discrepancy_actions a WHERE a.receipt_id=r.id) ORDER BY r.id::text""",(stockroom_id,)).fetchall()
-            for issue in receipt_issues:actions.append({'key':f"receipt-discrepancy:{issue['id']}",'severity':'warning','title':'Pakbonafwijking vraagt actie','detail':f"{issue['number']} · {issue['reference'] or 'ontvangst zonder pakbonnummer'}",'targetView':'orders','actionLabel':'Afwijking behandelen'})
+            receipts_ready=conn.execute("SELECT to_regclass('public.purchase_discrepancy_actions') IS NOT NULL AS ready").fetchone()['ready']
+            if receipts_ready:
+                receipt_issues=conn.execute("""SELECT DISTINCT r.id::text,COALESCE(o.order_number,o.reference,'Inkooporder') number,r.reference
+                    FROM purchase_receipts r JOIN orders o ON o.id=r.order_id LEFT JOIN purchase_receipt_lines l ON l.receipt_id=r.id
+                    WHERE r.stockroom_id=%s AND r.reversed_at IS NULL AND (l.discrepancy_code<>'match' OR jsonb_array_length(r.unexpected_items)>0)
+                    AND NOT EXISTS(SELECT 1 FROM purchase_discrepancy_actions a WHERE a.receipt_id=r.id) ORDER BY r.id::text""",(stockroom_id,)).fetchall()
+                for issue in receipt_issues:actions.append({'key':f"receipt-discrepancy:{issue['id']}",'severity':'warning','title':'Pakbonafwijking vraagt actie','detail':f"{issue['number']} · {issue['reference'] or 'ontvangst zonder pakbonnummer'}",'targetView':'orders','actionLabel':'Afwijking behandelen'})
             if role in ('owner','admin'):
                 approvals=conn.execute("SELECT id::text,COALESCE(order_number,reference,'Inkooporder') number,relation_name,approval_reason FROM orders WHERE stockroom_id=%s AND order_type='purchase' AND status='pending_approval' ORDER BY created_at",(stockroom_id,)).fetchall()
                 for order in approvals:actions.append({'key':f"purchase-approval:{order['id']}",'severity':'warning','title':'Inkooporder wacht op goedkeuring','detail':f"{order['number']} · {order['relation_name'] or 'Geen leverancier'} · {order['approval_reason']}",'targetView':'orders','actionLabel':'Order beoordelen'})
