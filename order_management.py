@@ -237,7 +237,7 @@ def order_rows(stockroom_id, order_type):
 
 def open_purchase_quantities(stockroom_id):
     with server.db() as conn:
-        rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity-l.supplier_cancelled_quantity),0)::float8 quantity
+        rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(GREATEST(0,l.quantity-l.fulfilled_quantity-l.supplier_cancelled_quantity)),0)::float8 quantity
             FROM order_lines l JOIN orders o ON o.id=l.order_id
             WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('draft','ordered','partial')
             GROUP BY l.item_id""", (stockroom_id,)).fetchall()
@@ -350,7 +350,7 @@ def create_purchase_advice_drafts(session, values):
         room = conn.execute("SELECT state FROM stockrooms WHERE id=%s", (session["stockroom_id"],)).fetchone()
         state = (room or {}).get("state") or {"items": []}
         items = {str(item.get("id")): item for item in state.get("items", []) if not item.get("archived")}
-        open_rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(l.quantity-l.fulfilled_quantity-l.supplier_cancelled_quantity),0)::float8 quantity
+        open_rows = conn.execute("""SELECT l.item_id,COALESCE(SUM(GREATEST(0,l.quantity-l.fulfilled_quantity-l.supplier_cancelled_quantity)),0)::float8 quantity
             FROM order_lines l JOIN orders o ON o.id=l.order_id
             WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('draft','ordered','partial')
             GROUP BY l.item_id""", (session["stockroom_id"],)).fetchall()
@@ -645,7 +645,7 @@ def update_order_status(session, expected_type, values):
         already_booked = order["inventory_booked_at"] is not None
         if already_booked:
             if expected_type == "purchase":
-                remaining = conn.execute("SELECT COALESCE(SUM(quantity-fulfilled_quantity-supplier_cancelled_quantity),0)::float8 remaining FROM order_lines WHERE order_id=%s", (order_id,)).fetchone()["remaining"]
+                remaining = conn.execute("SELECT COALESCE(SUM(GREATEST(0,quantity-fulfilled_quantity-supplier_cancelled_quantity)),0)::float8 remaining FROM order_lines WHERE order_id=%s", (order_id,)).fetchone()["remaining"]
                 if status != order["status"] or (status == "received" and remaining > 0.0005):
                     raise ValueError("De orderstatus wordt automatisch bepaald door de geregistreerde ontvangsten.")
             if expected_type == "sales" and status not in {"completed", "paid"}:

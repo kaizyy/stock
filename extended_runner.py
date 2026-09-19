@@ -26,8 +26,8 @@ import backup_status
 
 server.SESSION_TTL_SECONDS = 2 * 60 * 60
 
-def flat_form(handler):
-    form=handler.form_data() or {};return {key:(value[0] if isinstance(value,list) and value else value) for key,value in form.items()}
+def flat_form(handler,max_bytes=16_384):
+    form=handler.form_data(max_bytes=max_bytes) or {};return {key:(value[0] if isinstance(value,list) and value else value) for key,value in form.items()}
 
 class ExtendedHandler(app_runner.AppHandler):
     def end_headers(self):
@@ -182,6 +182,19 @@ class ExtendedHandler(app_runner.AppHandler):
             if not orders.allowed(s['role'],'read_purchase'):self.send_json(403,{"error":"Geen rechten."});return
             order_id=parse_qs(parsed.query).get('order_id',[''])[0].strip()
             self.send_json(200,{"receipts":purchase_receipts.rows(s['stockroom_id'],order_id)});return
+        if path=="/api/orders/receipt/document":
+            s=self.require_session(api=True)
+            if not s:return
+            try:
+                data,name,mime=purchase_receipts.attachment(s['stockroom_id'],parse_qs(parsed.query).get('id',[''])[0]);self.send_response(200);self.send_header('Content-Type',mime);self.send_header('Content-Disposition',f'inline; filename="{name.replace(chr(34),"")}"');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+            except PermissionError as exc:self.send_json(404,{"error":str(exc)})
+            return
+        if path=="/api/orders/receipt/report.pdf":
+            s=self.require_session(api=True)
+            if not s:return
+            try:data,name=purchase_receipts.discrepancy_pdf(s['stockroom_id'],parse_qs(parsed.query).get('id',[''])[0]);self.send_pdf(data,name)
+            except PermissionError as exc:self.send_json(404,{"error":str(exc)})
+            return
         if path=="/api/orders/returns":
             s=self.require_session(api=True)
             if not s:return
@@ -233,12 +246,12 @@ class ExtendedHandler(app_runner.AppHandler):
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/purchase-followup/run","/api/purchase-alternatives/create","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/orders/portal/create","/api/orders/portal/revoke","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
+        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/receipt/action","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/purchase-followup/run","/api/purchase-alternatives/create","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/orders/portal/create","/api/orders/portal/revoke","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
             if not s:return
-            values=flat_form(self)
+            values=flat_form(self,7_500_000 if path=="/api/orders/receive" else 16_384)
             try:
                 if path=="/api/account/sessions/revoke":
                     token=self.cookie_token();current=server.token_digest(token) if token else None;self.send_json(200,account_tools.revoke_session(s,values.get('session_id') or '',current,str(values.get('all_others') or '')=='1'));return
@@ -277,6 +290,7 @@ class ExtendedHandler(app_runner.AppHandler):
                     self.send_json(200,order_delete.delete_order(s,ot,values));return
                 if path=="/api/orders/receive":self.send_json(200,purchase_receipts.receive(s,values));return
                 if path=="/api/orders/receipt/reverse":self.send_json(200,purchase_receipts.reverse(s,values));return
+                if path=="/api/orders/receipt/action":self.send_json(200,purchase_receipts.create_discrepancy_action(s,values));return
                 if path=="/api/orders/returns":self.send_json(200,order_returns.create(s,values));return
                 if path=="/api/orders/returns/process":self.send_json(200,order_returns.process(s,values));return
                 if path=="/api/orders/returns/cancel":self.send_json(200,order_returns.change(s,values,'cancel'));return

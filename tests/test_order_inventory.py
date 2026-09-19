@@ -197,18 +197,23 @@ class OrderInventoryTests(unittest.TestCase):
         order_id = self.create_order("purchase", 5, 3.5)
         order_management.update_order_status(self.session, "purchase", {"order_id":order_id, "status":"ordered"})
         line_id = order_management.order_rows(str(self.room_id), "purchase")[0]["lines"][0]["id"]
-        first = purchase_receipts.receive(self.session, {"order_id":order_id,"reference":"PB-1",
-            "lines_json":json.dumps([{"line_id":line_id,"quantity":2}])})
+        first = purchase_receipts.receive(self.session, {"order_id":order_id,"reference":"PB-1","document_name":"pakbon.pdf","document_mime":"application/pdf","document_base64":"aGVsbG8=",
+            "lines_json":json.dumps([{"line_id":line_id,"quantity":2,"damaged_quantity":0.5,"note":"Doos beschadigd"}]),"unexpected_items_json":json.dumps([{"barcode":"WRONG-1","quantity":1}])})
         self.assertEqual(first["status"], "partial")
-        self.assertEqual(self.get_state()["items"][0]["stock"], 12)
+        self.assertEqual(first["discrepancies"],2)
+        self.assertEqual(self.get_state()["items"][0]["stock"], 11.5)
+        receipt_rows=purchase_receipts.rows(str(self.room_id),order_id);self.assertEqual(receipt_rows[0]["lines"][0]["damaged_quantity"],0.5);self.assertTrue(receipt_rows[0]["has_document"])
+        self.assertEqual(purchase_receipts.attachment(str(self.room_id),first["receiptId"])[0],b"hello")
+        self.assertTrue(purchase_receipts.discrepancy_pdf(str(self.room_id),first["receiptId"])[0].startswith(b"%PDF"))
+        action=purchase_receipts.create_discrepancy_action(self.session,{"receipt_id":first["receiptId"],"action_type":"claim","note":"Graag credit"});self.assertTrue(action["created"])
         second = purchase_receipts.receive(self.session, {"order_id":order_id,"reference":"PB-2",
             "lines_json":json.dumps([{"line_id":line_id,"quantity":3}])})
         self.assertEqual(second["status"], "received")
-        self.assertEqual(self.get_state()["items"][0]["stock"], 15)
+        self.assertEqual(self.get_state()["items"][0]["stock"], 14.5)
         self.assertEqual(len(purchase_receipts.rows(str(self.room_id),order_id)),2)
         reversed_result=purchase_receipts.reverse(self.session,{"receipt_id":second["receiptId"]})
         self.assertEqual(reversed_result["status"],"partial")
-        self.assertEqual(self.get_state()["items"][0]["stock"],12)
+        self.assertEqual(self.get_state()["items"][0]["stock"],11.5)
         purchase_receipts.reverse(self.session,{"receipt_id":first["receiptId"]})
         self.assertEqual(self.get_state()["items"][0]["stock"],10)
         self.assertEqual(order_management.order_rows(str(self.room_id),"purchase")[0]["status"],"ordered")
