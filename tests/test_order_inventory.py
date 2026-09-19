@@ -4,6 +4,7 @@ import unittest
 import uuid
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import server
 import runner
@@ -13,6 +14,7 @@ import purchase_receipts
 import order_returns
 import purchase_intelligence
 import purchase_approvals
+import supplier_portal
 import business_tools
 import billing
 import documents_v3
@@ -160,10 +162,16 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(len(followup["sent"]),1);reminder_smtp.send_message.assert_called_once()
         self.assertEqual(purchase_approvals.followup_overview(str(self.room_id))["summary"]["awaiting_confirmation"],1)
         delivery=(date.today()+timedelta(days=10)).isoformat()
+        token=parse_qs(urlparse(sent["portalUrl"]).query)["token"][0]
+        portal=supplier_portal.lookup(token);self.assertEqual(portal["order"]["id"],order["id"])
+        portal_line=portal["lines"][0]
+        supplier_portal.submit(token,{"confirmed_delivery_date":delivery,"confirmation_reference":"PORTAL-42",f"availability_{portal_line['id']}":"partial",f"quantity_{portal_line['id']}":"1",f"note_{portal_line['id']}":"Rest volgt"})
+        self.assertEqual(supplier_portal.lookup(token)["lines"][0]["availability"],"partial")
         confirmation=purchase_approvals.confirm_delivery(self.session,{"order_id":order["id"],"confirmed_delivery_date":delivery,"confirmation_reference":"BEV-42"})
         self.assertTrue(confirmation["confirmed"])
         approved=order_management.order_rows(str(self.room_id),"purchase")[0]
-        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved");self.assertEqual(approved["purchase_sent_to"],"supplier@example.test");self.assertEqual(str(approved["confirmed_delivery_date"]),delivery)
+        self.assertEqual(approved["status"],"ordered");self.assertEqual(approved["approval_status"],"approved");self.assertEqual(approved["purchase_sent_to"],"supplier@example.test");self.assertEqual(str(approved["confirmed_delivery_date"]),delivery);self.assertEqual(approved["lines"][0]["supplier_availability"],"partial")
+        supplier_portal.revoke(self.session,order["id"]);self.assertIsNone(supplier_portal.lookup(token))
 
     def test_partial_purchase_receipts_update_stock_status_and_can_reverse(self):
         order_id = self.create_order("purchase", 5, 3.5)

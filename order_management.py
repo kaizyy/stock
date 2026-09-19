@@ -224,8 +224,9 @@ def order_rows(stockroom_id, order_type):
         ).fetchall()
         for order in rows:
             order["lines"] = conn.execute(
-                """SELECT id::text,item_id,item_name,sku,quantity::float8,unit_price::float8,fulfilled_quantity::float8
-                   FROM order_lines WHERE order_id=%s ORDER BY created_at,id""",
+                """SELECT l.id::text,l.item_id,l.item_name,l.sku,l.quantity::float8,l.unit_price::float8,l.fulfilled_quantity::float8,
+                   r.availability supplier_availability,r.available_quantity::float8 supplier_available_quantity,r.note supplier_response_note
+                   FROM order_lines l LEFT JOIN supplier_portal_line_responses r ON r.order_line_id=l.id WHERE l.order_id=%s ORDER BY l.created_at,l.id""",
                 (order["id"],),
             ).fetchall()
             order["total"] = sum(float(line["quantity"]) * float(line["unit_price"]) for line in order["lines"])

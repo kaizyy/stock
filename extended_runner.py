@@ -14,6 +14,7 @@ import purchase_receipts
 import order_returns
 import purchase_intelligence
 import purchase_approvals
+import supplier_portal
 import warehouse_ops as warehouse
 import inventory_ledger
 import business_tools
@@ -53,6 +54,14 @@ class ExtendedHandler(app_runner.AppHandler):
         self.send_response(200);self.send_header("Content-Type","application/pdf");self.send_header("Content-Disposition",f'inline; filename="{filename}"');self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
     def do_GET(self):
         parsed=urlparse(self.path);path=parsed.path
+        if path=="/supplier-order":
+            token=parse_qs(parsed.query).get('token',[''])[0];self.send_html(200,supplier_portal.page(token));return
+        if path=="/supplier-order.pdf":
+            token=parse_qs(parsed.query).get('token',[''])[0];data=supplier_portal.lookup(token)
+            if not data:self.send_html(404,server.result_page('Link niet beschikbaar','Deze leverancierslink is ongeldig, verlopen of ingetrokken.'));return
+            try:pdf,name=business_tools.order_pdf(data['order']['stockroom_id'],data['order']['id']);self.send_pdf(pdf,name)
+            except Exception:self.send_html(500,server.result_page('PDF niet beschikbaar','De inkooporder kon niet worden geopend.'))
+            return
         if path in ("/","/index.html"):
             session=self.require_session(api=False)
             if not session:return
@@ -209,11 +218,17 @@ class ExtendedHandler(app_runner.AppHandler):
         return super().do_GET()
     def do_POST(self):
         path=urlparse(self.path).path
+        if path=="/supplier-order/respond":
+            if not self.enforce_origin():return
+            values=flat_form(self);token=values.get('token') or ''
+            try:supplier_portal.submit(token,values);self.send_html(200,supplier_portal.page(token,'Uw bevestiging is opgeslagen. U kunt deze link later opnieuw gebruiken om de leverdatum bij te werken.'))
+            except (ValueError,PermissionError) as exc:self.send_html(400,supplier_portal.page(token,error=str(exc)))
+            return
         if path=="/api/billing/webhook":
             try:length=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(length);event=json.loads(raw or b'{}');billing.apply_webhook(event);self.send_json(200,{"received":True})
             except Exception as e:platform_admin.record_error('stripe_webhook',type(e).__name__);self.send_json(400,{"error":"Webhook ongeldig."})
             return
-        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/purchase-followup/run","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
+        handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/purchase-followup/run","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/orders/portal/create","/api/orders/portal/revoke","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -269,8 +284,10 @@ class ExtendedHandler(app_runner.AppHandler):
                 if path=="/api/purchase-followup/run":self.send_json(200,purchase_approvals.run_due_followups(s));return
                 if path=="/api/orders/approve":self.send_json(200,purchase_approvals.decide(s,values,'approve'));return
                 if path=="/api/orders/reject":self.send_json(200,purchase_approvals.decide(s,values,'reject'));return
-                if path=="/api/orders/mail-purchase":self.send_json(200,purchase_approvals.send_order(s,values));return
+                if path=="/api/orders/mail-purchase":values['_base_url']=self.base_url();self.send_json(200,purchase_approvals.send_order(s,values));return
                 if path=="/api/orders/confirm-delivery":self.send_json(200,purchase_approvals.confirm_delivery(s,values));return
+                if path=="/api/orders/portal/create":self.send_json(200,supplier_portal.issue(s,values.get('order_id') or '',self.base_url(),values.get('days') or 30));return
+                if path=="/api/orders/portal/revoke":self.send_json(200,supplier_portal.revoke(s,values.get('order_id') or ''));return
                 if path=="/api/warehouse/count":self.send_json(200,{"updated":True,**warehouse.apply_count(s,values)});return
                 if path=="/api/warehouse/count/start":self.send_json(200,warehouse.start_count(s,values));return
                 if path=="/api/warehouse/count/line":self.send_json(200,warehouse.save_count_line(s,values));return

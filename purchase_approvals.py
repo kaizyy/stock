@@ -6,6 +6,7 @@ from email.message import EmailMessage
 
 import business_tools
 import server
+import supplier_portal
 
 
 def initialize():
@@ -33,6 +34,7 @@ def initialize():
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_delay_reminder_at TIMESTAMPTZ")
         conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS followup_mail_count INTEGER NOT NULL DEFAULT 0")
         conn.commit()
+    supplier_portal.initialize()
 
 
 def policy(stockroom_id):
@@ -103,8 +105,9 @@ def send_order(session, values):
     if not server.SMTP_HOST:raise ValueError('SMTP is niet geconfigureerd.')
     number=order['order_number'] or business_tools.assign_order_number(order_id,session['stockroom_id'],'purchase')
     data,filename=business_tools.order_pdf(session['stockroom_id'],order_id);company=(order['company_name'] or '').strip() or 'Stockroom'
-    default=f"Beste {order['supplier_name'] or order['relation_name'] or 'leverancier'},\n\nIn de bijlage vindt u onze inkooporder {number}. Wilt u de ontvangst en verwachte leverdatum bevestigen?\n\nMet vriendelijke groet,\n{company}"
-    message=(values.get('message') or default).strip();mail=EmailMessage();mail['From']=server.SMTP_FROM;mail['To']=recipient;mail['Subject']=f"Inkooporder {number} - {company}";mail.set_content(message);mail.add_attachment(data,maintype='application',subtype='pdf',filename=filename)
+    portal=supplier_portal.issue(session,order_id,values.get('_base_url') or server.APP_BASE_URL or '',values.get('portal_days') or 30)
+    default=f"Beste {order['supplier_name'] or order['relation_name'] or 'leverancier'},\n\nIn de bijlage vindt u onze inkooporder {number}. Bevestig de ontvangst, leverdatum en leverbaarheid via deze beveiligde link:\n{portal['url']}\n\nMet vriendelijke groet,\n{company}"
+    custom=(values.get('message') or '').strip();message=(custom+f"\n\nBevestig de order via deze beveiligde link:\n{portal['url']}" if custom else default);mail=EmailMessage();mail['From']=server.SMTP_FROM;mail['To']=recipient;mail['Subject']=f"Inkooporder {number} - {company}";mail.set_content(message);mail.add_attachment(data,maintype='application',subtype='pdf',filename=filename)
     context=ssl.create_default_context()
     if server.SMTP_PORT==465:
         with smtplib.SMTP_SSL(server.SMTP_HOST,server.SMTP_PORT,timeout=20,context=context) as smtp:
@@ -120,7 +123,7 @@ def send_order(session, values):
             purchase_mail_count=purchase_mail_count+1,updated_at=NOW() WHERE id=%s AND stockroom_id=%s AND status='approved' RETURNING id""",(recipient,order_id,session['stockroom_id'])).fetchone()
         if not updated:raise ValueError('De orderstatus is ondertussen gewijzigd; controleer de orderhistorie.')
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase.order_emailed',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':order_id,'recipient':recipient,'orderNumber':number})));conn.commit()
-    return {'sent':True,'recipient':recipient,'status':'ordered','orderNumber':number}
+    return {'sent':True,'recipient':recipient,'status':'ordered','orderNumber':number,'portalUrl':portal['url'],'portalExpiresInDays':portal['expiresInDays']}
 
 
 def confirm_delivery(session, values):
