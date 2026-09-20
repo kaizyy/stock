@@ -32,11 +32,11 @@ jobs:
       - uses: actions/checkout@v5
       - name: Install test dependencies
         run: |
-          python -m pip install "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5"
+          python -m pip install "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5" "pypdf>=5,<7" "pillow>=11,<13" "pytesseract>=0.3.13,<1"
           sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Python syntax and regression checks
         run: |
-          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py purchase_receipts.py purchase_invoices.py payment_batches.py order_returns.py purchase_intelligence.py purchase_approvals.py supplier_portal.py purchase_alternatives.py warehouse_ops.py inventory_ledger.py inventory_reconciliation.py business_tools.py platform_admin.py billing.py backup_status.py documents_v2.py documents_v3.py financial_workflow.py sales_workflow.py v11_integrations.py extended_runner.py tools/regression_check.py tests/*.py
+          python -m py_compile server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py purchase_receipts.py purchase_invoices.py payment_batches.py invoice_recognition.py order_returns.py purchase_intelligence.py purchase_approvals.py supplier_portal.py purchase_alternatives.py warehouse_ops.py inventory_ledger.py inventory_reconciliation.py business_tools.py platform_admin.py billing.py backup_status.py documents_v2.py documents_v3.py financial_workflow.py sales_workflow.py v11_integrations.py extended_runner.py tools/regression_check.py tests/*.py
           python tools/regression_check.py
           python -m unittest discover -s tests -v
         env:

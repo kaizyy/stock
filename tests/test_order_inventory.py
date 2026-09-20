@@ -1,4 +1,5 @@
 import json
+import base64
 import os
 import unittest
 import uuid
@@ -13,6 +14,7 @@ import order_management
 import purchase_receipts
 import purchase_invoices
 import payment_batches
+import invoice_recognition
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -335,6 +337,17 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(purchase_invoices.rows(str(self.room_id))[0]["status"], "paid")
         with self.assertRaisesRegex(ValueError, "Exporteer"):
             payment_batches.process(self.session, {"batch_id": batch["id"]})
+
+    def test_invoice_recognition_suggests_supplier_order_and_fields(self):
+        supplier_id = order_management.save_relation(self.session, "supplier", {"name": "Herken Leverancier", "email": "factuur@herken.test", "iban": "NL91ABNA0417164300"})
+        order_id = order_management.create_order(self.session, {"order_type": "purchase", "relation_id": supplier_id, "reference": "PO-7788", "lines_json": json.dumps([{"item_id": self.item_id, "item_name": "Testitem", "sku": "T-1", "quantity": 1, "unit_price": 100}])})
+        text = "Herken Leverancier factuur@herken.test Factuurnummer: INV-900 Factuurdatum: 20-09-2026 Vervaldatum: 20-10-2026 Inkooporder: PO-7788 Subtotaal 100,00 BTW 21,00 Totaal 121,00 IBAN NL91 ABNA 0417 1643 00 Betalingskenmerk: INV-900"
+        with patch.object(invoice_recognition, "extract_text", return_value=text):
+            result = invoice_recognition.recognize(self.session, {"document_mime": "application/pdf", "document_base64": base64.b64encode(b"pdf").decode()})
+        self.assertEqual(result["supplier"]["id"], supplier_id)
+        self.assertEqual(result["order"]["id"], order_id)
+        self.assertEqual(result["fields"]["invoice_number"], "INV-900")
+        self.assertEqual(result["fields"]["total_amount"], 121.0)
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {

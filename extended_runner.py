@@ -13,6 +13,7 @@ import order_delete
 import purchase_receipts
 import purchase_invoices
 import payment_batches
+import invoice_recognition
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -278,13 +279,15 @@ class ExtendedHandler(app_runner.AppHandler):
         handled={"/api/suppliers","/api/customers","/api/relations/delete","/api/orders","/api/orders/status","/api/orders/delete","/api/orders/receive","/api/orders/receipt/reverse","/api/orders/receipt/action","/api/orders/returns","/api/orders/returns/process","/api/orders/returns/cancel","/api/orders/returns/reverse","/api/orders/returns/credit","/api/orders/returns/claim","/api/orders/returns/refund","/api/purchase-advice/drafts","/api/purchase-policy","/api/purchase-followup/run","/api/purchase-alternatives/create","/api/orders/approve","/api/orders/reject","/api/orders/mail-purchase","/api/orders/confirm-delivery","/api/orders/portal/create","/api/orders/portal/revoke","/api/warehouse/count","/api/warehouse/count/start","/api/warehouse/count/line","/api/warehouse/count/submit","/api/warehouse/count/approve","/api/warehouse/count/cancel","/api/warehouse/return","/api/warehouse/transfer","/api/platform-admin/suspension","/api/billing/profile","/api/billing/checkout","/api/billing/portal","/api/notifications/state","/api/account/sessions/revoke","/api/account/notification-preferences","/api/import/preview","/api/import/apply"}
         handled.update({"/api/purchase-invoice-policy","/api/purchase-invoices","/api/purchase-invoices/approve","/api/purchase-invoices/reject","/api/purchase-invoices/dispute","/api/purchase-invoices/payment","/api/purchase-invoices/credit"})
         handled.update({"/api/payment-settings","/api/payment-batches","/api/payment-batches/approve","/api/payment-batches/cancel","/api/payment-batches/process"})
+        handled.add("/api/purchase-invoices/recognize")
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
             if not s:return
-            values=flat_form(self,7_500_000 if path in ("/api/orders/receive","/api/purchase-invoices") else 16_384)
+            values=flat_form(self,7_500_000 if path in ("/api/orders/receive","/api/purchase-invoices","/api/purchase-invoices/recognize") else 16_384)
             try:
                 if path=="/api/purchase-invoice-policy":self.send_json(200,purchase_invoices.save_policy(s,values));return
+                if path=="/api/purchase-invoices/recognize":self.send_json(200,invoice_recognition.recognize(s,values));return
                 if path=="/api/purchase-invoices":self.send_json(200,purchase_invoices.create(s,values));return
                 if path=="/api/purchase-invoices/approve":self.send_json(200,purchase_invoices.decide(s,values,'approve'));return
                 if path=="/api/purchase-invoices/reject":self.send_json(200,purchase_invoices.decide(s,values,'reject'));return

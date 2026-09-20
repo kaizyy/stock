@@ -22,6 +22,8 @@ def initialize():
             order_line_id UUID REFERENCES order_lines(id) ON DELETE SET NULL,item_name TEXT NOT NULL,quantity NUMERIC(14,3) NOT NULL,unit_price NUMERIC(14,4) NOT NULL,line_total NUMERIC(14,2) NOT NULL)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS purchase_invoice_credits(id UUID PRIMARY KEY,invoice_id UUID NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
             credit_number TEXT NOT NULL,amount NUMERIC(14,2) NOT NULL CHECK(amount>0),note TEXT NOT NULL DEFAULT '',created_by UUID REFERENCES users(id) ON DELETE SET NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(invoice_id,credit_number))""")
+        conn.execute("ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS payment_reference TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS invoice_iban TEXT NOT NULL DEFAULT ''")
         conn.commit()
 
 
@@ -85,13 +87,14 @@ def create(session, values):
         except Exception as exc:raise ValueError('Controleer factuur- en vervaldatum.') from exc
         conn.execute("""INSERT INTO purchase_invoices(id,stockroom_id,order_id,supplier_id,invoice_number,invoice_date,due_date,subtotal,vat_amount,shipping_amount,total_amount,status,document_name,document_mime,document_data,match_result,created_by)
             VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",(invoice_id,session['stockroom_id'],order_id,order['relation_id'],number,inv_date,due,subtotal,vat,shipping,total,status,name,mime,document,json.dumps({'discrepancies':discrepancies,'tolerances':setting,'lines':[{'lineId':line_id,'item':by_id[line_id]['item_name'],'ordered':float(by_id[line_id]['ordered']),'received':float(by_id[line_id]['received']),'invoiced':quantity,'orderPrice':float(by_id[line_id]['unit_price']),'invoicePrice':price} for line_id,quantity,price in lines]}),session['user_id']))
+        conn.execute("UPDATE purchase_invoices SET payment_reference=%s,invoice_iban=%s WHERE id=%s",((values.get('payment_reference') or '')[:140],(values.get('invoice_iban') or '').replace(' ','').upper()[:34],invoice_id))
         for line_id,quantity,price in lines:conn.execute("INSERT INTO purchase_invoice_lines(id,invoice_id,order_line_id,item_name,quantity,unit_price,line_total) VALUES(%s,%s,%s,%s,%s,%s,%s)",(str(uuid.uuid4()),invoice_id,line_id,by_id[line_id]['item_name'],quantity,price,round(quantity*price,2)))
         conn.execute("INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,'purchase_invoice.matched',%s::jsonb)",(session['stockroom_id'],session['user_id'],json.dumps({'id':invoice_id,'orderId':order_id,'invoiceNumber':number,'status':status,'discrepancies':len(discrepancies)})));conn.commit()
     return {'created':True,'id':invoice_id,'status':status,'discrepancies':discrepancies}
 
 
 def rows(stockroom_id):
-    with server.db() as conn:data=conn.execute("""SELECT i.id::text,i.order_id::text,i.invoice_number,i.invoice_date,i.due_date,i.subtotal::float8,i.vat_amount::float8,i.shipping_amount::float8,i.total_amount::float8,i.dispute_amount::float8,i.paid_amount::float8,i.status,i.match_result,i.document_name,o.order_number,o.relation_name,
+    with server.db() as conn:data=conn.execute("""SELECT i.id::text,i.order_id::text,i.invoice_number,i.invoice_date,i.due_date,i.subtotal::float8,i.vat_amount::float8,i.shipping_amount::float8,i.total_amount::float8,i.dispute_amount::float8,i.paid_amount::float8,i.status,i.match_result,i.document_name,i.payment_reference,i.invoice_iban,o.order_number,o.relation_name,
         COALESCE((SELECT SUM(amount) FROM purchase_invoice_credits c WHERE c.invoice_id=i.id),0)::float8 credited FROM purchase_invoices i JOIN orders o ON o.id=i.order_id WHERE i.stockroom_id=%s ORDER BY i.invoice_date DESC,i.created_at DESC""",(stockroom_id,)).fetchall()
     for row in data:row['outstanding']=max(0,float(row['total_amount'])-float(row['paid_amount'])-float(row['credited'])-float(row['dispute_amount']));row['paymentBlocked']=row['status'] not in ('approved','partially_disputed')
     return data

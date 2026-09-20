@@ -78,6 +78,8 @@ def check_web_feature_parity() -> None:
     require(read("purchase_invoice_ui.js"), ["purchaseInvoicePanel", "/api/purchase-invoices", "Controletoleranties", "Creditnota", "Betaling", "data-pi-action"], "Bediening leveranciersfacturen")
     require(read("payment_batches.py"), ["payment_settings", "payment_batches", "payment_batch_items", "def valid_iban", "def candidates", "def sepa", "pain.001.001.03", "payment_batch.processed"], "Betaalvoorstellen, IBAN-validatie en SEPA-export")
     require(read("payment_batches_ui.js"), ["paymentBatchPanel", "/api/payment-batches", "/api/payment-settings", "SEPA downloaden", "Als verwerkt boeken"], "Betaalbatchbediening")
+    require(read("invoice_recognition.py"), ["def extract_text", "pytesseract", "PdfReader", "def parse_text", "order_reference", "textPreview", "confidence"], "Lokale PDF- en fotoherkenning")
+    require(read("purchase_invoice_ui.js"), ["recognizeFile", "/api/purchase-invoices/recognize", "piRecognitionStatus", "Controleer alle gegevens"], "Factuurherkenning in uploadflow")
     require(read("order_management.py"), ["iban", "bic"], "Leveranciersbankgegevens")
     require(read("extended_runner.py"), ["purchase_invoices.initialize", '"/api/purchase-invoices/document"', '"/api/purchase-invoice-policy"', '"/api/purchase-invoices/payment"'], "Inkoopfactuurroutes")
     require(read("order_returns.py"), ["order_returns", "order_return_lines", "fulfilled_quantity", "rma_number", "return_sequences", "reason_code", "def analytics", "expected_refund", "claim_status", "def record_refund", "def label_pdf", "def process", "def create_credit"], "Gekoppelde orderretouren, claims, analyse en labels")

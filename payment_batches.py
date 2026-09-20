@@ -55,11 +55,11 @@ def save_settings(session, values):
 
 
 def candidates(stockroom_id):
-    with server.db() as conn:rows=conn.execute("""SELECT i.id::text,i.invoice_number,i.due_date,i.total_amount::float8,i.paid_amount::float8,i.dispute_amount::float8,s.name supplier_name,s.iban,s.bic,
+    with server.db() as conn:rows=conn.execute("""SELECT i.id::text,i.invoice_number,i.due_date,i.total_amount::float8,i.paid_amount::float8,i.dispute_amount::float8,i.invoice_iban,s.name supplier_name,s.iban,s.bic,
         COALESCE((SELECT SUM(c.amount) FROM purchase_invoice_credits c WHERE c.invoice_id=i.id),0)::float8 credited
         FROM purchase_invoices i JOIN suppliers s ON s.id=i.supplier_id WHERE i.stockroom_id=%s AND i.status='approved'
         AND NOT EXISTS(SELECT 1 FROM payment_batch_items bi JOIN payment_batches b ON b.id=bi.batch_id WHERE bi.invoice_id=i.id AND b.status IN ('draft','approved','exported','processed')) ORDER BY i.due_date,i.invoice_number""",(stockroom_id,)).fetchall()
-    for row in rows:row['amount']=max(0,row['total_amount']-row['paid_amount']-row['dispute_amount']-row['credited']);row['bankReady']=valid_iban(row['iban'])
+    for row in rows:row['amount']=max(0,row['total_amount']-row['paid_amount']-row['dispute_amount']-row['credited']);row['ibanMismatch']=bool(row['invoice_iban'] and _iban(row['invoice_iban'])!=_iban(row['iban']));row['bankReady']=valid_iban(row['iban']) and not row['ibanMismatch']
     return [row for row in rows if row['amount']>0.005]
 
 
