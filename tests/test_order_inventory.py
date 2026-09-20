@@ -413,6 +413,21 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertTrue(name.endswith('.zip'))
         with zipfile.ZipFile(io.BytesIO(archive)) as zipped:self.assertIn('marges-per-artikel.csv',zipped.namelist())
 
+    def test_profit_report_includes_only_standalone_manual_transactions(self):
+        state = self.get_state();today = date.today().isoformat() + "T12:00:00"
+        state["transactions"] = [
+            {"id":"manual-sale","type":"outgoing","itemId":self.item_id,"qty":2,"price":10,"party":"Losse klant","done":False,"date":today},
+            {"id":"manual-buy","type":"incoming","itemId":self.item_id,"qty":3,"price":4,"party":"Losse leverancier","done":True,"paid":True,"date":today},
+            {"id":"linked-sale","type":"outgoing","itemId":self.item_id,"qty":99,"price":10,"party":"Dubbel","date":today,"orderId":str(uuid.uuid4())},
+        ]
+        with server.db() as conn:
+            conn.execute("UPDATE stockrooms SET state=%s::jsonb WHERE id=%s", (json.dumps(state), self.room_id));conn.commit()
+        result = profit_reporting.report(str(self.room_id), date.today().year, "month", date.today().month)
+        self.assertEqual(result["summary"]["revenue"], 20.0)
+        self.assertEqual(result["summary"]["costOfGoods"], 12.0)
+        self.assertEqual(result["summary"]["grossProfit"], 8.0)
+        self.assertEqual(len([row for row in result["lines"] if row.get("manual")]), 2)
+
     def test_cashflow_forecast_uses_open_invoices_and_scenarios(self):
         sales_id = self.create_order("sales", 1, 100)
         order_management.update_order_status(self.session, "sales", {"order_id": sales_id, "status": "completed"})

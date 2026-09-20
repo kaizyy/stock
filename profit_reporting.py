@@ -49,6 +49,15 @@ def _data(stockroom_id, start, end):
     for row in list(lines)+list(quote_rows):
         item=items.get(str(row['item_id'])) or {};revenue=float(row['quantity'])*float(row['unit_price']);credit_ratio=min(1,float(row['credited'] or 0)/float(row.get('invoice_gross') or row['invoice_net'] or 1));revenue*=1-credit_ratio;estimated=row['cost_price'] is None;unit_cost=float(row['cost_price']) if row['cost_price'] is not None else float(item.get('buy') or 0);cost=float(row['quantity'])*unit_cost*(1-credit_ratio)
         rows.append({'invoice_number':row['invoice_number'],'invoice_date':row['invoice_date'],'customer':row['relation_name'] or 'Geen klant','item_id':str(row['item_id']),'item':row['item_name'],'supplier':item.get('supplier') or 'Niet gekoppeld','quantity':row['quantity'],'revenue':round(revenue,2),'cost':round(cost,2),'margin':round(revenue-cost,2),'estimatedCost':estimated})
+    linked_keys=('orderId','order_id','quoteId','quote_id','invoiceId','invoice_id','receiptId')
+    for transaction in state.get('transactions',[]):
+        if any(transaction.get(key) for key in linked_keys):continue
+        try:transaction_date=date.fromisoformat(str(transaction.get('date') or '')[:10]);quantity=float(transaction.get('qty') or 0);amount=round(quantity*float(transaction.get('price') or 0),2)
+        except (TypeError,ValueError):continue
+        if not start<=transaction_date<end or quantity<=0 or amount<0 or transaction.get('type') not in ('incoming','outgoing'):continue
+        item=items.get(str(transaction.get('itemId'))) or {};outgoing=transaction['type']=='outgoing';customer=(transaction.get('party') or 'Geen klant') if outgoing else 'Niet van toepassing';supplier=(transaction.get('party') or item.get('supplier') or 'Geen leverancier') if not outgoing else (item.get('supplier') or 'Niet gekoppeld')
+        rows.append({'invoice_number':'Handmatig','invoice_date':transaction_date,'customer':customer,'item_id':str(transaction.get('itemId') or ''),'item':item.get('name') or item.get('sku') or 'Onbekend artikel','supplier':supplier,'quantity':quantity,
+            'revenue':amount if outgoing else 0.0,'cost':0.0 if outgoing else amount,'margin':amount if outgoing else -amount,'estimatedCost':False,'manual':True,'transactionType':transaction['type']})
     expenses=list(expenses)+list(fees);revenue=round(sum(x['revenue'] for x in rows),2);cogs=round(sum(x['cost'] for x in rows),2);expense_total=round(sum(float(x['net_amount']) for x in expenses),2)
     return {'lines':rows,'expenses':expenses,'summary':{'revenue':revenue,'costOfGoods':cogs,'grossProfit':round(revenue-cogs,2),'operatingExpenses':expense_total,'netProfit':round(revenue-cogs-expense_total,2),'grossMarginPercent':round((revenue-cogs)/revenue*100,1) if revenue else 0},'estimatedCount':sum(1 for x in rows if x['estimatedCost'])}
 
