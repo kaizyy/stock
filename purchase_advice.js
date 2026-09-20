@@ -63,4 +63,4 @@
   ensurePanel(); refresh();
 })();
 import('/purchase_intelligence_ui.js?v=20260918-1').catch(() => {});
-import('/purchase_approval_ui.js?v=20260918-1').catch(() => {});
+import('/purchase_approval_ui.js?v=20260920-2').catch(() => {});
