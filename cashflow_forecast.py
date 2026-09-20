@@ -38,6 +38,25 @@ def _clamp_day(value, today):
     return max(today+timedelta(days=1),value)
 
 
+def _manual_events(state, today):
+    """Return unpaid standalone stock transactions; linked workflow rows are excluded."""
+    items={str(item.get('id')):item for item in state.get('items',[])};events=[]
+    for transaction in state.get('transactions',[]):
+        if any(transaction.get(key) for key in ('orderId','order_id','quoteId','quote_id','invoiceId','invoice_id','receiptId')):continue
+        kind=transaction.get('type')
+        if kind not in ('incoming','outgoing'):continue
+        if kind=='incoming' and transaction.get('paid'):continue
+        if kind=='outgoing' and transaction.get('done'):continue
+        try:amount=round(float(transaction.get('qty') or 0)*float(transaction.get('price') or 0),2);when=_clamp_day(transaction.get('date'),today)
+        except (TypeError,ValueError):continue
+        if amount<=0:continue
+        item=items.get(str(transaction.get('itemId'))) or {};party=(transaction.get('party') or '').strip();item_name=item.get('name') or item.get('sku') or 'artikel'
+        events.append({'date':when,'kind':'manual_purchase' if kind=='incoming' else 'manual_sale','direction':'out' if kind=='incoming' else 'in',
+            'label':f"Losse {'inkoop' if kind=='incoming' else 'verkoop'} · {party or item_name}",'amount':amount,'certainty':1.0 if kind=='incoming' else 0.9,
+            'transactionId':str(transaction.get('id') or '')})
+    return events
+
+
 def _events(stockroom_id):
     today=date.today();events=[];batches=payment_batches.overview(stockroom_id)['batches'];batched=set()
     for batch in batches:
@@ -50,12 +69,14 @@ def _events(stockroom_id):
     for invoice in purchase_rows:
         if invoice['id'] not in batched and invoice['status'] in ('approved','partially_disputed') and invoice['outstanding']>0:events.append({'date':_clamp_day(invoice['due_date'],today),'kind':'purchase_invoice','direction':'out','label':invoice['invoice_number'],'amount':float(invoice['outstanding']),'certainty':1.0})
     with server.db() as conn:
+        room=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(stockroom_id,)).fetchone();state=(room or {}).get('state') or {'items':[],'transactions':[]}
         orders=conn.execute("""SELECT o.id::text,COALESCE(o.order_number,o.reference,'Inkooporder') label,COALESCE(o.expected_delivery_date,o.confirmed_delivery_date,o.order_date+14) expected_date,
             COALESCE(SUM((l.quantity-l.supplier_cancelled_quantity)*l.unit_price),0)::float8 total FROM orders o JOIN order_lines l ON l.order_id=o.id
             WHERE o.stockroom_id=%s AND o.order_type='purchase' AND o.status IN ('approved','ordered','partial') AND NOT EXISTS(SELECT 1 FROM purchase_invoices i WHERE i.order_id=o.id AND i.status<>'rejected') GROUP BY o.id ORDER BY expected_date""",(stockroom_id,)).fetchall()
         costs=conn.execute("""SELECT COALESCE(SUM(net_amount),0)::float8 total FROM operating_expenses WHERE stockroom_id=%s AND expense_date>=CURRENT_DATE-90 AND expense_date<CURRENT_DATE""",(stockroom_id,)).fetchone()['total']
         fees_ready=conn.execute("SELECT to_regclass('public.bank_allocations') IS NOT NULL AS ready").fetchone()['ready'];fees=0
         if fees_ready:fees=conn.execute("SELECT COALESCE(SUM(a.amount),0)::float8 total FROM bank_allocations a JOIN bank_transactions t ON t.id=a.transaction_id WHERE t.stockroom_id=%s AND a.target_type='bank_fee' AND t.booking_date>=CURRENT_DATE-90 AND t.booking_date<CURRENT_DATE",(stockroom_id,)).fetchone()['total']
+    events.extend(_manual_events(state,today))
     for order in orders:
         if order['total']>0:events.append({'date':_clamp_day(order['expected_date'],today),'kind':'purchase_order','direction':'out','label':order['label'],'amount':float(order['total']),'certainty':0.9})
     monthly=round((float(costs)+float(fees))/3,2)
@@ -85,4 +106,4 @@ def forecast(stockroom_id):
     elif first_buffer:alerts.append({'severity':'warning','message':f"De minimumbuffer wordt naar verwachting onderschreden vanaf {first_buffer['date'].strftime('%d-%m-%Y')}."})
     unconfigured=not config['configured']
     if unconfigured:alerts.append({'severity':'warning','message':'Vul het actuele banksaldo in om de prognose betrouwbaar te maken.'})
-    return {'settings':config,'events':events,'scenarios':scenarios,'alerts':alerts,'assumptions':{'conservative':'70% van verwachte ontvangsten; uitgaven volledig','expected':'90% zekerheid per verkoopfactuur; uitgaven volledig','optimistic':'110% ontvangstsnelheid begrensd door factuurbedragen; uitgaven volledig'}}
+    return {'settings':config,'events':events,'scenarios':scenarios,'alerts':alerts,'assumptions':{'conservative':'70% van verwachte ontvangsten; uitgaven volledig','expected':'90% zekerheid voor open verkoopbedragen; uitgaven volledig','optimistic':'110% ontvangstsnelheid begrensd door open verkoopbedragen; uitgaven volledig'}}

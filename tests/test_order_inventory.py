@@ -424,6 +424,25 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertAlmostEqual(result["scenarios"]["expected"]["90"]["endingBalance"], 1108.9)
         self.assertLess(result["scenarios"]["conservative"]["90"]["endingBalance"], result["scenarios"]["optimistic"]["90"]["endingBalance"])
 
+    def test_cashflow_forecast_includes_only_unpaid_standalone_transactions(self):
+        state = self.get_state()
+        tomorrow = (date.today() + timedelta(days=1)).isoformat() + "T12:00:00"
+        state["transactions"] = [
+            {"id":"manual-sale","type":"outgoing","itemId":self.item_id,"qty":2,"price":10,"party":"Losse klant","done":False,"date":tomorrow},
+            {"id":"manual-buy","type":"incoming","itemId":self.item_id,"qty":3,"price":4,"party":"Losse leverancier","done":False,"paid":False,"date":tomorrow},
+            {"id":"paid-sale","type":"outgoing","itemId":self.item_id,"qty":99,"price":10,"done":True,"date":tomorrow},
+            {"id":"linked-sale","type":"outgoing","itemId":self.item_id,"qty":99,"price":10,"done":False,"date":tomorrow,"orderId":str(uuid.uuid4())},
+        ]
+        with server.db() as conn:
+            conn.execute("UPDATE stockrooms SET state=%s::jsonb WHERE id=%s", (json.dumps(state), self.room_id));conn.commit()
+        cashflow_forecast.save_settings(self.session, {"current_balance":"1000","balance_date":date.today().isoformat(),"minimum_buffer":"0"})
+        result = cashflow_forecast.forecast(str(self.room_id))
+        manual = [event for event in result["events"] if event["kind"].startswith("manual_")]
+        self.assertEqual({event["kind"] for event in manual}, {"manual_sale", "manual_purchase"})
+        self.assertEqual(sum(event["amount"] for event in manual if event["direction"]=="in"), 20.0)
+        self.assertEqual(sum(event["amount"] for event in manual if event["direction"]=="out"), 12.0)
+        self.assertAlmostEqual(result["scenarios"]["expected"]["30"]["endingBalance"], 1006.0)
+
     def test_monthly_budget_compares_actuals_and_forecasts(self):
         sales_id = self.create_order("sales", 1, 100)
         order_management.update_order_status(self.session, "sales", {"order_id": sales_id, "status": "completed"})
