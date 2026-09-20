@@ -10,4 +10,5 @@
   document.addEventListener('submit',async event=>{try{if(event.target.id==='budgetPeriodForm'){event.preventDefault();await load()}else if(event.target.id==='monthlyBudgetForm'){event.preventDefault();await api('/api/monthly-budget',{method:'POST',body:new FormData(event.target)});await load()}}catch(error){alert(error.message)}});
   document.addEventListener('click',event=>{const button=event.target.closest('[data-budget-go]');if(!button)return;const target=document.querySelector(`[data-view="${button.dataset.budgetGo}"]`);target?.click();if(button.dataset.budgetAnchor)setTimeout(()=>document.getElementById(button.dataset.budgetAnchor)?.scrollIntoView({behavior:'smooth'}),100)});
   document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='analytics')load().catch(()=>{})});install();load().catch(()=>{});
+  document.addEventListener('stockroom:analytics-ready',()=>load().catch(()=>{}));
 })();
