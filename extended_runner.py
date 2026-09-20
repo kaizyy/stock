@@ -18,6 +18,7 @@ import invoice_recognition
 import bank_reconciliation
 import tax_reporting
 import profit_reporting
+import cashflow_forecast
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -215,6 +216,10 @@ class ExtendedHandler(app_runner.AppHandler):
             if s:
                 query=parse_qs(parsed.query);self.send_json(200,profit_reporting.report(s['stockroom_id'],query.get('year',[date.today().year])[0],query.get('mode',['month'])[0],query.get('value',[date.today().month])[0]))
             return
+        if path=="/api/cashflow-forecast":
+            s=self.require_session(api=True)
+            if s:self.send_json(200,cashflow_forecast.forecast(s['stockroom_id']))
+            return
         if path=="/api/profit-report/export":
             s=self.require_session(api=True)
             if not s:return
@@ -315,6 +320,7 @@ class ExtendedHandler(app_runner.AppHandler):
         handled.update({"/api/bank-import","/api/bank-transactions/reconcile"})
         handled.update({"/api/tax-adjustments","/api/tax-adjustments/delete"})
         handled.update({"/api/operating-expenses","/api/operating-expenses/delete"})
+        handled.add("/api/cashflow-settings")
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -328,6 +334,7 @@ class ExtendedHandler(app_runner.AppHandler):
                 if path=="/api/tax-adjustments/delete":self.send_json(200,tax_reporting.delete_adjustment(s,values.get('adjustment_id') or ''));return
                 if path=="/api/operating-expenses":self.send_json(200,profit_reporting.save_expense(s,values));return
                 if path=="/api/operating-expenses/delete":self.send_json(200,profit_reporting.delete_expense(s,values.get('expense_id') or ''));return
+                if path=="/api/cashflow-settings":self.send_json(200,cashflow_forecast.save_settings(s,values));return
                 if path=="/api/purchase-invoices/recognize":self.send_json(200,invoice_recognition.recognize(s,values));return
                 if path=="/api/purchase-invoices":self.send_json(200,purchase_invoices.create(s,values));return
                 if path=="/api/purchase-invoices/approve":self.send_json(200,purchase_invoices.decide(s,values,'approve'));return
@@ -413,5 +420,5 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();payment_batches.initialize();bank_reconciliation.initialize();tax_reporting.initialize();profit_reporting.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();payment_batches.initialize();bank_reconciliation.initialize();tax_reporting.initialize();profit_reporting.initialize();cashflow_forecast.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()

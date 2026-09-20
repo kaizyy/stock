@@ -85,6 +85,8 @@ def check_web_feature_parity() -> None:
     require(read("tax_reporting_ui.js"), ["taxReportPanel", "/api/tax-report", "Accountantsexport downloaden", "Btw-correctie", "controlepunt"], "Btw-rapportagebediening")
     require(read("profit_reporting.py"), ["operating_expenses", "costOfGoods", "grossProfit", "netProfit", "estimatedCost", "bySupplier", "marges-per-artikel.csv"], "Winst-en-verlies en margeanalyse")
     require(read("profit_reporting_ui.js"), ["profitReportPanel", "/api/profit-report", "Nettoresultaat", "Marge per artikel", "Marge per klant", "Marge per leverancier", "expenseForm"], "Resultaatrapportagebediening")
+    require(read("cashflow_forecast.py"), ["cashflow_settings", "minimum_buffer", "sales_invoice", "purchase_invoice", "payment_batch", "purchase_order", "recurring_costs", "conservative", "optimistic"], "Kasstroomprognose 30/60/90")
+    require(read("cashflow_forecast_ui.js"), ["cashflowPanel", "/api/cashflow-forecast", "Saldo na", "Conservatief", "Optimistisch", "data-cash-scenario"], "Kasstroomscenario's en grafiek")
     require(read("order_management.py"), ["cost_price", "_snapshot_sales_costs"], "Historische kostprijs per verkoopregel")
     require(read("purchase_invoice_ui.js"), ["recognizeFile", "/api/purchase-invoices/recognize", "piRecognitionStatus", "Controleer alle gegevens"], "Factuurherkenning in uploadflow")
     require(read("order_management.py"), ["iban", "bic"], "Leveranciersbankgegevens")

@@ -8,11 +8,13 @@ COPY invoice_recognition.py /app/
 COPY bank_reconciliation.py /app/
 COPY tax_reporting.py /app/
 COPY profit_reporting.py /app/
+COPY cashflow_forecast.py /app/
 COPY purchase_invoice_ui.js /app/public/
 COPY payment_batches_ui.js /app/public/
 COPY bank_reconciliation_ui.js /app/public/
 COPY tax_reporting_ui.js /app/public/
 COPY profit_reporting_ui.js /app/public/
+COPY cashflow_forecast_ui.js /app/public/
 
 RUN apk add --no-cache curl su-exec postgresql-client tesseract-ocr tesseract-ocr-data-nld tesseract-ocr-data-eng \
     && pip install --no-cache-dir "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5" "pypdf>=5,<7" "pillow>=11,<13" "pytesseract>=0.3.13,<1"

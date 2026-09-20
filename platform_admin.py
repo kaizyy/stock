@@ -200,6 +200,12 @@ def action_center(stockroom_id, role):
         if bank_ready and role in ('owner','admin'):
             unmatched=conn.execute("SELECT COUNT(*) n,COALESCE(SUM(ABS(amount)),0)::float8 total FROM bank_transactions WHERE stockroom_id=%s AND status='unmatched'",(stockroom_id,)).fetchone()
             if unmatched['n']:actions.append({'key':'bank-unmatched','severity':'warning','title':f"{unmatched['n']} bankmutatie(s) vragen controle",'detail':f"Totaal te beoordelen: € {unmatched['total']:.2f}",'targetView':'finance','actionLabel':'Bankmutaties koppelen'})
+    if role in ('owner','admin'):
+        try:
+            import cashflow_forecast
+            cash=cashflow_forecast.forecast(stockroom_id)
+            for index,alert in enumerate(cash['alerts']):actions.append({'key':f"cashflow:{index}",'severity':alert['severity'],'title':'Kasstroomprognose vraagt aandacht','detail':alert['message'],'targetView':'finance','actionLabel':'Prognose bekijken'})
+        except Exception:pass
     rank={'danger':0,'warning':1,'info':2}
     actions.sort(key=lambda action:(rank.get(action['severity'],3),action['title']))
     return actions[:100]

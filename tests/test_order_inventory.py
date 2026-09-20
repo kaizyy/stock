@@ -20,6 +20,7 @@ import invoice_recognition
 import bank_reconciliation
 import tax_reporting
 import profit_reporting
+import cashflow_forecast
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -50,6 +51,7 @@ class OrderInventoryTests(unittest.TestCase):
         bank_reconciliation.initialize()
         tax_reporting.initialize()
         profit_reporting.initialize()
+        cashflow_forecast.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
@@ -408,6 +410,17 @@ class OrderInventoryTests(unittest.TestCase):
         archive, name = profit_reporting.export(self.session, date.today().year, "month", date.today().month)
         self.assertTrue(name.endswith('.zip'))
         with zipfile.ZipFile(io.BytesIO(archive)) as zipped:self.assertIn('marges-per-artikel.csv',zipped.namelist())
+
+    def test_cashflow_forecast_uses_open_invoices_and_scenarios(self):
+        sales_id = self.create_order("sales", 1, 100)
+        order_management.update_order_status(self.session, "sales", {"order_id": sales_id, "status": "completed"})
+        documents_v3.ensure_invoice(str(self.room_id), sales_id)
+        cashflow_forecast.save_settings(self.session, {"current_balance": "1000", "balance_date": date.today().isoformat(), "minimum_buffer": "950"})
+        result = cashflow_forecast.forecast(str(self.room_id))
+        self.assertTrue(result["settings"]["configured"])
+        self.assertTrue(any(event["kind"] == "sales_invoice" for event in result["events"]))
+        self.assertAlmostEqual(result["scenarios"]["expected"]["90"]["endingBalance"], 1108.9)
+        self.assertLess(result["scenarios"]["conservative"]["90"]["endingBalance"], result["scenarios"]["optimistic"]["90"]["endingBalance"])
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {
