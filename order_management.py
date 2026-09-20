@@ -96,6 +96,7 @@ def initialize_order_management():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id)")
         conn.execute("ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS supplier_cancelled_quantity NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK(supplier_cancelled_quantity>=0 AND supplier_cancelled_quantity<=quantity)")
         conn.execute("ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS source_order_line_id UUID REFERENCES order_lines(id) ON DELETE SET NULL")
+        conn.execute("ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS cost_price NUMERIC(14,4)")
         conn.execute("""CREATE TABLE IF NOT EXISTS inventory_reservations(
             order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
             stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,
@@ -283,6 +284,11 @@ def _sync_sales_reservations(conn, stockroom_id, order_id, lines, active=True):
         conn.execute("INSERT INTO inventory_reservations(order_id,stockroom_id,item_id,quantity) VALUES(%s,%s,%s,%s)",(order_id,stockroom_id,item_id,qty))
 
 
+def _snapshot_sales_costs(conn, stockroom_id, order_id):
+    room=conn.execute("SELECT state FROM stockrooms WHERE id=%s",(stockroom_id,)).fetchone();state=(room or {}).get('state') or {'items':[]};costs={str(item.get('id')):max(0,float(item.get('buy') or 0)) for item in state.get('items',[])}
+    for item_id,cost in costs.items():conn.execute("UPDATE order_lines SET cost_price=%s WHERE order_id=%s AND item_id=%s AND cost_price IS NULL",(cost,order_id,item_id))
+
+
 def create_order(session, values):
     order_type = values.get("order_type")
     if order_type not in ("purchase", "sales"):
@@ -318,7 +324,7 @@ def create_order(session, values):
                 "INSERT INTO order_lines(id,order_id,item_id,item_name,sku,quantity,unit_price) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                 (str(uuid.uuid4()), order_id, item_id, item_name, sku, qty, price),
             )
-        if order_type=="sales":_sync_sales_reservations(conn,session["stockroom_id"],order_id,lines,status!="cancelled")
+        if order_type=="sales":_snapshot_sales_costs(conn,session["stockroom_id"],order_id);_sync_sales_reservations(conn,session["stockroom_id"],order_id,lines,status!="cancelled")
         conn.execute(
             "INSERT INTO audit_log(stockroom_id,user_id,action,details) VALUES(%s,%s,%s,%s::jsonb)",
             (session["stockroom_id"], session["user_id"], f"order.{order_type}.created", json.dumps({"id": order_id, "reference": reference, "relation": relation_name, "lines": len(lines)})),
@@ -516,6 +522,7 @@ def update_order(session, values):
                 (str(uuid.uuid4()), order_id, item_id, item_name, sku, qty, price),
             )
 
+        if expected_type=="sales":_snapshot_sales_costs(conn,session["stockroom_id"],order_id)
         if expected_type=="sales" and order["inventory_booked_at"] is None:_sync_sales_reservations(conn,session["stockroom_id"],order_id,lines,order["status"]!="cancelled")
 
         if room is not None:

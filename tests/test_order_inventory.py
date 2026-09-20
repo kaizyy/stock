@@ -19,6 +19,7 @@ import payment_batches
 import invoice_recognition
 import bank_reconciliation
 import tax_reporting
+import profit_reporting
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -48,6 +49,7 @@ class OrderInventoryTests(unittest.TestCase):
         payment_batches.initialize()
         bank_reconciliation.initialize()
         tax_reporting.initialize()
+        profit_reporting.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
@@ -391,6 +393,21 @@ class OrderInventoryTests(unittest.TestCase):
         archive, name = tax_reporting.export(self.session, date.today().year, quarter)
         self.assertTrue(name.endswith('.zip'))
         with zipfile.ZipFile(io.BytesIO(archive)) as zipped:self.assertEqual(set(zipped.namelist()), {'btw-samenvatting.csv','verkoopfacturen.csv','inkoopfacturen.csv','btw-correcties.csv','bankmutaties.csv','controlepunten.csv'})
+
+    def test_profit_report_uses_historical_costs_expenses_and_comparison(self):
+        sales_id = self.create_order("sales", 1, 100)
+        order_management.update_order_status(self.session, "sales", {"order_id": sales_id, "status": "completed"})
+        documents_v3.ensure_invoice(str(self.room_id), sales_id)
+        with server.db() as conn:
+            cost = conn.execute("SELECT cost_price::float8 cost FROM order_lines WHERE order_id=%s", (sales_id,)).fetchone()["cost"]
+        self.assertEqual(cost, 4.0)
+        profit_reporting.save_expense(self.session, {"expense_date": date.today().isoformat(), "category": "Software", "supplier_name": "SaaS", "description": "Abonnement", "net_amount": "10", "vat_amount": "2.10"})
+        result = profit_reporting.report(str(self.room_id), date.today().year, "month", date.today().month)
+        self.assertEqual(result["summary"]["revenue"], 100.0);self.assertEqual(result["summary"]["costOfGoods"], 4.0);self.assertEqual(result["summary"]["grossProfit"], 96.0);self.assertEqual(result["summary"]["netProfit"], 86.0)
+        self.assertEqual(result["byItem"][0]["marginPercent"], 96.0);self.assertEqual(result["estimatedCount"], 0)
+        archive, name = profit_reporting.export(self.session, date.today().year, "month", date.today().month)
+        self.assertTrue(name.endswith('.zip'))
+        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:self.assertIn('marges-per-artikel.csv',zipped.namelist())
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {
