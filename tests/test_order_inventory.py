@@ -421,7 +421,7 @@ class OrderInventoryTests(unittest.TestCase):
         result = cashflow_forecast.forecast(str(self.room_id))
         self.assertTrue(result["settings"]["configured"])
         self.assertTrue(any(event["kind"] == "sales_invoice" for event in result["events"]))
-        self.assertAlmostEqual(result["scenarios"]["expected"]["90"]["endingBalance"], 1108.9)
+        self.assertAlmostEqual(result["scenarios"]["expected"]["90"]["endingBalance"], 1121.0)
         self.assertLess(result["scenarios"]["conservative"]["90"]["endingBalance"], result["scenarios"]["optimistic"]["90"]["endingBalance"])
 
     def test_cashflow_forecast_includes_only_unpaid_standalone_transactions(self):
@@ -441,7 +441,7 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual({event["kind"] for event in manual}, {"manual_sale", "manual_purchase"})
         self.assertEqual(sum(event["amount"] for event in manual if event["direction"]=="in"), 20.0)
         self.assertEqual(sum(event["amount"] for event in manual if event["direction"]=="out"), 12.0)
-        self.assertAlmostEqual(result["scenarios"]["expected"]["30"]["endingBalance"], 1006.0)
+        self.assertAlmostEqual(result["scenarios"]["expected"]["30"]["endingBalance"], 1008.0)
 
     def test_monthly_budget_compares_actuals_and_forecasts(self):
         sales_id = self.create_order("sales", 1, 100)

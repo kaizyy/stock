@@ -52,7 +52,7 @@ def _manual_events(state, today):
         if amount<=0:continue
         item=items.get(str(transaction.get('itemId'))) or {};party=(transaction.get('party') or '').strip();item_name=item.get('name') or item.get('sku') or 'artikel'
         events.append({'date':when,'kind':'manual_purchase' if kind=='incoming' else 'manual_sale','direction':'out' if kind=='incoming' else 'in',
-            'label':f"Losse {'inkoop' if kind=='incoming' else 'verkoop'} · {party or item_name}",'amount':amount,'certainty':1.0 if kind=='incoming' else 0.9,
+            'label':f"Losse {'inkoop' if kind=='incoming' else 'verkoop'} · {party or item_name}",'amount':amount,'certainty':1.0,
             'transactionId':str(transaction.get('id') or '')})
     return events
 
@@ -64,7 +64,7 @@ def _events(stockroom_id):
             for item in batch['items']:batched.add(item['invoice_id'])
             events.append({'date':_clamp_day(batch['execution_date'],today),'kind':'payment_batch','direction':'out','label':batch['batch_number'],'amount':float(batch['total']),'certainty':1.0})
     for invoice in financial_workflow.list_invoices(stockroom_id):
-        if invoice['outstanding']>0:events.append({'date':_clamp_day(invoice.get('due_date'),today),'kind':'sales_invoice','direction':'in','label':invoice['invoice_number'],'amount':float(invoice['outstanding']),'certainty':0.9})
+        if invoice['outstanding']>0:events.append({'date':_clamp_day(invoice.get('due_date'),today),'kind':'sales_invoice','direction':'in','label':invoice['invoice_number'],'amount':float(invoice['outstanding']),'certainty':1.0})
     purchase_rows=purchase_invoices.rows(stockroom_id)
     for invoice in purchase_rows:
         if invoice['id'] not in batched and invoice['status'] in ('approved','partially_disputed') and invoice['outstanding']>0:events.append({'date':_clamp_day(invoice['due_date'],today),'kind':'purchase_invoice','direction':'out','label':invoice['invoice_number'],'amount':float(invoice['outstanding']),'certainty':1.0})
@@ -106,4 +106,4 @@ def forecast(stockroom_id):
     elif first_buffer:alerts.append({'severity':'warning','message':f"De minimumbuffer wordt naar verwachting onderschreden vanaf {first_buffer['date'].strftime('%d-%m-%Y')}."})
     unconfigured=not config['configured']
     if unconfigured:alerts.append({'severity':'warning','message':'Vul het actuele banksaldo in om de prognose betrouwbaar te maken.'})
-    return {'settings':config,'events':events,'scenarios':scenarios,'alerts':alerts,'assumptions':{'conservative':'70% van verwachte ontvangsten; uitgaven volledig','expected':'90% zekerheid voor open verkoopbedragen; uitgaven volledig','optimistic':'110% ontvangstsnelheid begrensd door open verkoopbedragen; uitgaven volledig'}}
+    return {'settings':config,'events':events,'scenarios':scenarios,'alerts':alerts,'assumptions':{'conservative':'70% van verwachte ontvangsten; uitgaven volledig','expected':'100% van alle openstaande ontvangsten en uitgaven','optimistic':'110% ontvangstsnelheid begrensd door open verkoopbedragen; uitgaven volledig'}}
