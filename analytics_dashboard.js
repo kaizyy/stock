@@ -42,7 +42,7 @@
     }
 
     const content = view.querySelector('#analyticsContent');
-    ['cashflowPanel', 'profitReportPanel', 'taxReportPanel'].forEach(id => {
+    ['budgetPlanningPanel', 'cashflowPanel', 'profitReportPanel', 'taxReportPanel'].forEach(id => {
       const panel = document.getElementById(id);
       if (panel && panel.parentElement !== content) content.appendChild(panel);
     });

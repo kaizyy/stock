@@ -41,7 +41,7 @@ jobs:
           python -m py_compile bank_reconciliation.py
           python -m py_compile tax_reporting.py
           python -m py_compile profit_reporting.py
-          python -m py_compile cashflow_forecast.py
+          python -m py_compile cashflow_forecast.py budget_planning.py
           python -m unittest discover -s tests -v
         env:
           TEST_DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_test

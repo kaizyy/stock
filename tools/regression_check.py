@@ -88,6 +88,9 @@ def check_web_feature_parity() -> None:
     require(read("cashflow_forecast.py"), ["cashflow_settings", "minimum_buffer", "sales_invoice", "purchase_invoice", "payment_batch", "purchase_order", "recurring_costs", "conservative", "optimistic"], "Kasstroomprognose 30/60/90")
     require(read("cashflow_forecast_ui.js"), ["cashflowPanel", "/api/cashflow-forecast", "Saldo na", "Conservatief", "Optimistisch", "data-cash-scenario"], "Kasstroomscenario's en grafiek")
     require(read("analytics_dashboard.js"), ["cashflowPanel", "profitReportPanel", "taxReportPanel", "analyticsContent"], "Financiële rapporten onder Analytics")
+    require(read("budget_planning.py"), ["monthly_budgets", "revenue_target", "gross_profit_target", "expense_limit", "forecastVariance", "budget.updated"], "Maandbudgetten en afwijkingsanalyse")
+    require(read("budget_planning_ui.js"), ["budgetPlanningPanel", "/api/budget-overview", "/api/monthly-budget", "Budget en afwijkingen", "data-budget-go"], "Budgetbediening en doorklikken")
+    require(read("extended_runner.py"), ["budget_planning.initialize", '"/api/budget-overview"', '"/api/monthly-budget"'], "Budgetroutes")
     for filename in ("cashflow_forecast_ui.js", "profit_reporting_ui.js", "tax_reporting_ui.js"):
         require(read(filename), ["view==='analytics'"], f"Analytics-verversing in {filename}")
     require(read("order_management.py"), ["cost_price", "_snapshot_sales_costs"], "Historische kostprijs per verkoopregel")

@@ -21,6 +21,7 @@ import bank_reconciliation
 import tax_reporting
 import profit_reporting
 import cashflow_forecast
+import budget_planning
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -52,6 +53,7 @@ class OrderInventoryTests(unittest.TestCase):
         tax_reporting.initialize()
         profit_reporting.initialize()
         cashflow_forecast.initialize()
+        budget_planning.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
@@ -421,6 +423,19 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertTrue(any(event["kind"] == "sales_invoice" for event in result["events"]))
         self.assertAlmostEqual(result["scenarios"]["expected"]["90"]["endingBalance"], 1108.9)
         self.assertLess(result["scenarios"]["conservative"]["90"]["endingBalance"], result["scenarios"]["optimistic"]["90"]["endingBalance"])
+
+    def test_monthly_budget_compares_actuals_and_forecasts(self):
+        sales_id = self.create_order("sales", 1, 100)
+        order_management.update_order_status(self.session, "sales", {"order_id": sales_id, "status": "completed"})
+        documents_v3.ensure_invoice(str(self.room_id), sales_id)
+        profit_reporting.save_expense(self.session, {"expense_date": date.today().isoformat(), "category": "Software", "description": "Abonnement", "net_amount": "10", "vat_amount": "2.10"})
+        budget_planning.save(self.session, {"year": date.today().year, "month": date.today().month, "revenue_target": "200", "gross_profit_target": "150", "expense_limit": "20"})
+        result = budget_planning.overview(str(self.room_id), date.today().year, date.today().month)
+        self.assertEqual(result["metrics"]["revenue"]["actual"], 100.0)
+        self.assertEqual(result["metrics"]["grossProfit"]["actual"], 96.0)
+        self.assertEqual(result["metrics"]["operatingExpenses"]["actual"], 10.0)
+        self.assertEqual(result["budget"]["revenue"], 200.0)
+        self.assertIn("forecastVariance", result["metrics"]["revenue"])
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {
