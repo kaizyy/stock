@@ -16,6 +16,7 @@ COPY bank_reconciliation_ui.js /app/public/
 COPY tax_reporting_ui.js /app/public/
 COPY profit_reporting_ui.js /app/public/
 COPY cashflow_forecast_ui.js /app/public/
+COPY cashflow_action_navigation.js /app/public/
 COPY budget_planning_ui.js /app/public/
 
 RUN apk add --no-cache curl su-exec postgresql-client tesseract-ocr tesseract-ocr-data-nld tesseract-ocr-data-eng \

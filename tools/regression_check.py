@@ -119,6 +119,7 @@ def check_web_feature_parity() -> None:
     require(read("dynamic_navigation.js"), ["stockroom:refresh", "detail:{view:id}"], "Automatisch verversen bij navigatie")
     require(app, ["stockroom:refresh", "navigationRefreshTimer", "loadState()"], "Kerngegevens verversen bij navigatie")
     require(read("action_center.js"), ["actionCenter", "/api/action-center", "data-action-view", "stockroom:refresh"], "Centraal actiecentrum")
+    require(read("cashflow_action_navigation.js"), ["#actionCenter", "Kasstroomprognose", "data-view=\"analytics\"", "cashflowPanel", "stopImmediatePropagation", "scrollIntoView"], "Kasstroomactie naar Analytics")
     require(read("platform_admin.py"), ["def action_center", "inventory_counts", "late-delivery", "purchase-approval:", "supplier-confirmation:", "confirmed-delay:", "supplier-shortage:", "receipt-discrepancy:", "quote-followup", "reservation:", "return:", "supplier-claim:", "wacht op verwerking"], "Actiebronnen en rolfiltering")
     require(dashboard, ['"/api/me"', '"/api/members"', '"/api/invitations"', '"/api/audit"', '"/api/audit/clear"', '"/api/inventory/meta"', '"/api/inventory/correct"', '"/invite/login"', '"/invite/register"', 'audit.cleared', 'audit_log', 'invitations', 'parse_stock_delta', 'decimal_json_number'], "Backend beheer-API")
     require(app_runner, ['"/api/mobile/login"', '"/api/mobile/logout"', '"/api/mobile/switch-stockroom"', '"/api/stockrooms/create"', 'self_test_permissions()'], "Applicatierunner")
