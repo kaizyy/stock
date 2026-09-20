@@ -196,6 +196,10 @@ def action_center(stockroom_id, role):
         if batches_ready and role in ('owner','admin'):
             pending_batches=conn.execute("SELECT id::text,batch_number,status,execution_date FROM payment_batches WHERE stockroom_id=%s AND status IN ('draft','exported') ORDER BY execution_date",(stockroom_id,)).fetchall()
             for batch in pending_batches:actions.append({'key':f"payment-batch:{batch['id']}",'severity':'warning','title':f"Betaalbatch {batch['batch_number']} vraagt actie",'detail':'Wacht op goedkeuring' if batch['status']=='draft' else 'SEPA geëxporteerd · bevestig verwerking na uitvoering door de bank','targetView':'finance','actionLabel':'Betaalbatch bekijken'})
+        bank_ready=conn.execute("SELECT to_regclass('public.bank_transactions') IS NOT NULL AS ready").fetchone()['ready']
+        if bank_ready and role in ('owner','admin'):
+            unmatched=conn.execute("SELECT COUNT(*) n,COALESCE(SUM(ABS(amount)),0)::float8 total FROM bank_transactions WHERE stockroom_id=%s AND status='unmatched'",(stockroom_id,)).fetchone()
+            if unmatched['n']:actions.append({'key':'bank-unmatched','severity':'warning','title':f"{unmatched['n']} bankmutatie(s) vragen controle",'detail':f"Totaal te beoordelen: € {unmatched['total']:.2f}",'targetView':'finance','actionLabel':'Bankmutaties koppelen'})
     rank={'danger':0,'warning':1,'info':2}
     actions.sort(key=lambda action:(rank.get(action['severity'],3),action['title']))
     return actions[:100]

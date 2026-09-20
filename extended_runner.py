@@ -14,6 +14,7 @@ import purchase_receipts
 import purchase_invoices
 import payment_batches
 import invoice_recognition
+import bank_reconciliation
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -190,6 +191,10 @@ class ExtendedHandler(app_runner.AppHandler):
             s=self.require_session(api=True)
             if s:self.send_json(200,payment_batches.overview(s['stockroom_id']))
             return
+        if path=="/api/bank-transactions":
+            s=self.require_session(api=True)
+            if s:self.send_json(200,bank_reconciliation.overview(s['stockroom_id']))
+            return
         if path=="/api/payment-batches/sepa":
             s=self.require_session(api=True)
             if not s:return
@@ -280,13 +285,16 @@ class ExtendedHandler(app_runner.AppHandler):
         handled.update({"/api/purchase-invoice-policy","/api/purchase-invoices","/api/purchase-invoices/approve","/api/purchase-invoices/reject","/api/purchase-invoices/dispute","/api/purchase-invoices/payment","/api/purchase-invoices/credit"})
         handled.update({"/api/payment-settings","/api/payment-batches","/api/payment-batches/approve","/api/payment-batches/cancel","/api/payment-batches/process"})
         handled.add("/api/purchase-invoices/recognize")
+        handled.update({"/api/bank-import","/api/bank-transactions/reconcile"})
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
             if not s:return
-            values=flat_form(self,7_500_000 if path in ("/api/orders/receive","/api/purchase-invoices","/api/purchase-invoices/recognize") else 16_384)
+            values=flat_form(self,7_500_000 if path in ("/api/orders/receive","/api/purchase-invoices","/api/purchase-invoices/recognize","/api/bank-import") else 16_384)
             try:
                 if path=="/api/purchase-invoice-policy":self.send_json(200,purchase_invoices.save_policy(s,values));return
+                if path=="/api/bank-import":self.send_json(200,bank_reconciliation.import_file(s,values));return
+                if path=="/api/bank-transactions/reconcile":self.send_json(200,bank_reconciliation.reconcile(s,values));return
                 if path=="/api/purchase-invoices/recognize":self.send_json(200,invoice_recognition.recognize(s,values));return
                 if path=="/api/purchase-invoices":self.send_json(200,purchase_invoices.create(s,values));return
                 if path=="/api/purchase-invoices/approve":self.send_json(200,purchase_invoices.decide(s,values,'approve'));return
@@ -372,5 +380,5 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();payment_batches.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();payment_batches.initialize();bank_reconciliation.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()

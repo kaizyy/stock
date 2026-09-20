@@ -15,6 +15,7 @@ import purchase_receipts
 import purchase_invoices
 import payment_batches
 import invoice_recognition
+import bank_reconciliation
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -42,6 +43,7 @@ class OrderInventoryTests(unittest.TestCase):
         purchase_receipts.initialize()
         purchase_invoices.initialize()
         payment_batches.initialize()
+        bank_reconciliation.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
@@ -348,6 +350,24 @@ class OrderInventoryTests(unittest.TestCase):
         self.assertEqual(result["order"]["id"], order_id)
         self.assertEqual(result["fields"]["invoice_number"], "INV-900")
         self.assertEqual(result["fields"]["total_amount"], 121.0)
+
+    def test_mt940_import_matches_sales_invoice_once(self):
+        order_id = self.create_order("sales", 1, 100)
+        order_management.update_order_status(self.session, "sales", {"order_id": order_id, "status": "completed"})
+        invoice = documents_v3.ensure_invoice(str(self.room_id), order_id)
+        statement = f":20:START\n:25:NL91ABNA0417164300\n:61:260920C121,00NTRF\n:86:FACTUUR {invoice['invoice_number']}\n:62F:C260920EUR121,00\n".encode()
+        values = {"filename": "statement.mt940", "file_base64": base64.b64encode(statement).decode()}
+        result = bank_reconciliation.import_file(self.session, values)
+        self.assertEqual(result["imported"], 1);self.assertEqual(result["automaticallyMatched"], 1)
+        paid = next(row for row in financial_workflow.list_invoices(str(self.room_id)) if row["order_id"] == order_id)
+        self.assertEqual(paid["status"], "paid")
+        with self.assertRaisesRegex(ValueError, "al geïmporteerd"):
+            bank_reconciliation.import_file(self.session, values)
+
+    def test_camt_parser_reads_credit_and_debit(self):
+        xml = b'''<Document><BkToCstmrStmt><Stmt><Ntry><Amt Ccy="EUR">10.50</Amt><CdtDbtInd>CRDT</CdtDbtInd><BookgDt><Dt>2026-09-20</Dt></BookgDt><AcctSvcrRef>A1</AcctSvcrRef><NtryDtls><TxDtls><Refs><EndToEndId>INV-1</EndToEndId></Refs><RmtInf><Ustrd>Factuur INV-1</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry><Ntry><Amt Ccy="EUR">2.25</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-09-20</Dt></BookgDt><AcctSvcrRef>A2</AcctSvcrRef></Ntry></Stmt></BkToCstmrStmt></Document>'''
+        rows = bank_reconciliation.parse_camt(xml)
+        self.assertEqual(rows[0]["amount"], 10.5);self.assertEqual(rows[1]["amount"], -2.25)
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {
