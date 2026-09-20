@@ -9,5 +9,5 @@
   async function load(){install();const [me,result]=await Promise.all([api('/api/me'),api('/api/cashflow-forecast')]);role=me.stockroom?.role||'member';data=result;render()}
   document.addEventListener('click',event=>{const button=event.target.closest('[data-cash-scenario]');if(button){scenario=button.dataset.cashScenario;render()}});
   document.addEventListener('submit',async event=>{if(event.target.id!=='cashflowSettingsForm')return;event.preventDefault();try{await api('/api/cashflow-settings',{method:'POST',body:new FormData(event.target)});await load()}catch(error){alert(error.message)}});
-  document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='finance')load()});install();load().catch(()=>{});
+  document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='analytics')load()});install();load().catch(()=>{});
 })();

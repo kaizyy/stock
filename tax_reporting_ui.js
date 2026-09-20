@@ -9,5 +9,5 @@
   async function load(){install();const form=document.getElementById('taxPeriodForm'),year=form.elements.year.value,quarter=form.elements.quarter.value,[me,data]=await Promise.all([api('/api/me'),api(`/api/tax-report?year=${year}&quarter=${quarter}`)]);role=me.stockroom?.role||'member';report=data;render()}
   document.addEventListener('submit',async event=>{try{if(event.target.id==='taxPeriodForm'){event.preventDefault();await load();return}if(event.target.id==='taxAdjustmentForm'){event.preventDefault();await api('/api/tax-adjustments',{method:'POST',body:new FormData(event.target)});await load()}}catch(error){alert(error.message)}});
   document.addEventListener('click',async event=>{const button=event.target.closest('[data-delete-tax]');if(!button||!confirm('Deze btw-correctie verwijderen?'))return;try{const body=new FormData();body.set('adjustment_id',button.dataset.deleteTax);await api('/api/tax-adjustments/delete',{method:'POST',body});await load()}catch(error){alert(error.message)}});
-  document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='finance')load()});install();load().catch(()=>{});
+  document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='analytics')load()});install();load().catch(()=>{});
 })();

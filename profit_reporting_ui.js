@@ -11,5 +11,5 @@
   document.addEventListener('change',event=>{if(event.target.closest('#profitPeriodForm')&&event.target.name==='mode')periodOptions()});
   document.addEventListener('submit',async event=>{try{if(event.target.id==='profitPeriodForm'){event.preventDefault();periodOptions();await load();return}if(event.target.id==='expenseForm'){event.preventDefault();await api('/api/operating-expenses',{method:'POST',body:new FormData(event.target)});await load()}}catch(error){alert(error.message)}});
   document.addEventListener('click',async event=>{const button=event.target.closest('[data-delete-expense]');if(!button||!confirm('Deze kostenpost verwijderen?'))return;try{const body=new FormData();body.set('expense_id',button.dataset.deleteExpense);await api('/api/operating-expenses/delete',{method:'POST',body});await load()}catch(error){alert(error.message)}});
-  document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='finance')load()});install();load().catch(()=>{});
+  document.addEventListener('stockroom:refresh',event=>{if(event.detail?.view==='analytics')load()});install();load().catch(()=>{});
 })();

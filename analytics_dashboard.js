@@ -42,6 +42,10 @@
     }
 
     const content = view.querySelector('#analyticsContent');
+    ['cashflowPanel', 'profitReportPanel', 'taxReportPanel'].forEach(id => {
+      const panel = document.getElementById(id);
+      if (panel && panel.parentElement !== content) content.appendChild(panel);
+    });
     const revenueMetric = document.querySelector('#overview .revenue-metric');
     const chartPanel = document.querySelector('#overview .chart-panel');
     if (revenueMetric && !content.querySelector('.analytics-existing-metrics')) {
