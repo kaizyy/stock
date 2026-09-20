@@ -8,7 +8,7 @@
     if (role === 'seller') return type === 'customer' || type === 'sales';
     return false;
   };
-  let me, state={items:[],transactions:[]}, suppliers=[], customers=[], purchaseOrders=[], salesOrders=[];
+  let me, state={items:[],transactions:[]}, suppliers=[], customers=[], purchaseOrders=[], salesOrders=[], refreshInFlight=null, refreshQueued=false;
 
   async function api(url, options={}) {
     const r=await fetch(url,{cache:'no-store',...options});
@@ -42,7 +42,7 @@
   function statuses(type){return type==='purchase'?[['draft','Concept'],['pending_approval','Wacht op goedkeuring'],['approved','Goedgekeurd'],['rejected','Afgewezen'],['ordered','Besteld'],['partial','Deels ontvangen'],['received','Ontvangen'],['cancelled','Geannuleerd']]:[['draft','Concept'],['processing','In behandeling'],['shipped','Verzonden'],['completed','Afgerond'],['paid','Betaald'],['cancelled','Geannuleerd']]}
   function renderOrders(type,rows){const target=document.getElementById(type==='purchase'?'purchaseOrders':'salesOrders');const canWrite=roleCan(me.stockroom.role,type,true);target.innerHTML=rows.length?rows.map(o=>`<div class="order-card" data-order-card-id="${esc(o.id)}" data-order-card-type="${type}" data-relation-email="${esc(o.relation_email||'')}"><div class="order-card-head"><div><strong>${esc(o.order_number||o.reference||'Order')}</strong><small>${o.reference&&o.reference!==o.order_number?`${esc(o.reference)} · `:''}${esc(o.relation_name||'Geen relatie')} · ${new Date(o.order_date).toLocaleDateString('nl-NL')}</small>${type==='purchase'&&o.expected_delivery_date?`<small>Verwacht: ${new Date(o.expected_delivery_date).toLocaleDateString('nl-NL')}${o.advice_details?.priceWarnings?.length?` · ⚠ ${esc(o.advice_details.priceWarnings.join(', '))}`:''}</small>`:''}</div><strong>${euro.format(o.total||0)}</strong></div><div class="order-lines-mini">${o.lines.map(l=>`${Number(l.quantity)}× ${esc(l.item_name)}`).join(' · ')}</div>${canWrite?`<button type="button" class="crm-edit" data-edit-order="${esc(o.id)}" data-order-type="${type}">Bewerken</button><select data-order-status="${esc(o.id)}" data-order-type="${type}">${statuses(type).map(([v,l])=>`<option value="${v}"${v===o.status?' selected':''}>${l}</option>`).join('')}</select>`:`<small>Status: ${esc(o.status)}</small>`}</div>`).join(''):'<small>Nog geen orders.</small>'}
 
-  async function refresh(){
+  async function refreshNow(){
     try{
       me=await api('/api/me'); state=await api('/api/state');
       const role=me.stockroom.role;
@@ -56,6 +56,12 @@
       if(roleCan(role,'purchase')){purchaseOrders=(await api('/api/orders?type=purchase')).orders;renderOrders('purchase',purchaseOrders)}
       if(roleCan(role,'sales')){salesOrders=(await api('/api/orders?type=sales')).orders;renderOrders('sales',salesOrders)}
     }catch(e){if(e.message!=='session')message(e.message,true)}
+  }
+
+  function refresh(){
+    if(refreshInFlight){refreshQueued=true;return refreshInFlight}
+    refreshInFlight=refreshNow().finally(()=>{refreshInFlight=null;if(refreshQueued){refreshQueued=false;refresh()}});
+    return refreshInFlight;
   }
 
   async function saveRelation(form,kind){const button=form.querySelector('button[type="submit"]');button.disabled=true;try{const body=new FormData(form);if(kind==='supplier')body.set('ordering_weekdays',Array.from(form.elements.ordering_weekdays.selectedOptions).map(option=>option.value).join(','));const saved=await api(`/api/${kind==='supplier'?'suppliers':'customers'}`,{method:'POST',body});if(!saved.relation?.id)throw new Error('De database heeft de relatie niet bevestigd.');form.reset();if(kind==='supplier')form.elements.lead_time_days.value=14;const rows=kind==='supplier'?suppliers:customers;const index=rows.findIndex(row=>row.id===saved.relation.id);if(index>=0)rows[index]=saved.relation;else rows.push(saved.relation);renderRelations(kind,rows);message(`${kind==='supplier'?'Leverancier':'Klant'} opgeslagen in de database.`)}catch(e){message(e.message,true)}finally{button.disabled=false}}
