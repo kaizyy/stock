@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260914-3" />
+  <link rel="stylesheet" href="styles.css?v=20260920-4" />
 </head>
 <body>
   <div class="app-shell">
@@ -38,6 +38,7 @@
           <article class="metric revenue-metric"><div class="metric-icon green">↗</div><p>Daadwerkelijke omzet</p><h2 id="revenueValue">€ 0,00</h2><span>Uitgaand minus betaalde inkoop</span><div class="received-revenue"><small>Tot nu toe verkregen</small><strong id="receivedRevenueValue">€ 0,00</strong><em>verkopen minus openstaand</em></div></article>
           <article class="metric outstanding-metric"><div class="metric-icon amber">◷</div><p>Openstaand</p><h2 id="outstandingValue">€ 0,00</h2><span id="outstandingCount">0 betalingen te ontvangen</span><div class="metric-detail"><span>Tot 7 dagen <strong id="outstandingRecentValue">€ 0,00</strong></span><span class="danger-text">Ouder dan 7 dagen <strong id="outstandingOverdueValue">€ 0,00</strong></span></div></article>
           <article class="metric expected-metric"><div class="metric-icon blue">▣</div><p>Verwacht</p><h2 id="expectedValue">€ 0,00</h2><span id="expectedCount">0 inkomende leveringen</span><div class="metric-detail"><span class="success-text">Betaald, niet geleverd <strong id="expectedPaidValue">€ 0,00</strong></span><span class="danger-text">Niet betaald, niet geleverd <strong id="expectedUnpaidValue">€ 0,00</strong></span></div></article>
+          <article class="metric cashflow-balance-metric"><div class="metric-icon green">€</div><p>Actueel saldo</p><h2 id="cashflowBalanceValue">€ 0,00</h2><span id="cashflowBalanceDate">Kasstroomsaldo laden…</span><div class="metric-detail"><span>Minimale buffer <strong id="cashflowBufferValue">€ 0,00</strong></span><button class="text-button" type="button" data-go="analytics">Bekijk prognose →</button></div></article>
         </div>
 
         <div class="dashboard-grid">
@@ -123,7 +124,7 @@
   <script src="/bank_reconciliation_ui.js?v=20260920-1"></script>
   <script src="/tax_reporting_ui.js?v=20260920-3"></script>
   <script src="/profit_reporting_ui.js?v=20260920-4"></script>
-  <script src="/cashflow_forecast_ui.js?v=20260920-5"></script>
+  <script src="/cashflow_forecast_ui.js?v=20260920-6"></script>
   <script src="/budget_planning_ui.js?v=20260920-2"></script>
 </body>
 </html>
