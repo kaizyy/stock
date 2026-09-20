@@ -81,6 +81,8 @@ def check_web_feature_parity() -> None:
     require(read("invoice_recognition.py"), ["def extract_text", "pytesseract", "PdfReader", "def parse_text", "order_reference", "textPreview", "confidence"], "Lokale PDF- en fotoherkenning")
     require(read("bank_reconciliation.py"), ["bank_imports", "bank_transactions", "bank_allocations", "def parse_camt", "def parse_mt940", "def reconcile", "automaticallyMatched", "bank_fee", "payment_batch"], "CAMT/MT940-bankmatching")
     require(read("bank_reconciliation_ui.js"), ["bankReconciliationPanel", "/api/bank-import", "/api/bank-transactions/reconcile", "Als bankkosten", "data-bank-candidate"], "Bankmutatiecontrole")
+    require(read("tax_reporting.py"), ["tax_adjustments", "outputVat", "inputVat", "payable", "def export", "btw-samenvatting.csv", "bankmutaties.csv", "controlepunten.csv"], "Btw-rapport en accountantsexport")
+    require(read("tax_reporting_ui.js"), ["taxReportPanel", "/api/tax-report", "Accountantsexport downloaden", "Btw-correctie", "controlepunt"], "Btw-rapportagebediening")
     require(read("purchase_invoice_ui.js"), ["recognizeFile", "/api/purchase-invoices/recognize", "piRecognitionStatus", "Controleer alle gegevens"], "Factuurherkenning in uploadflow")
     require(read("order_management.py"), ["iban", "bic"], "Leveranciersbankgegevens")
     require(read("extended_runner.py"), ["purchase_invoices.initialize", '"/api/purchase-invoices/document"', '"/api/purchase-invoice-policy"', '"/api/purchase-invoices/payment"'], "Inkoopfactuurroutes")

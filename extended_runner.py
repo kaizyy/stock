@@ -1,4 +1,5 @@
 from functools import partial
+from datetime import date
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import time
@@ -15,6 +16,7 @@ import purchase_invoices
 import payment_batches
 import invoice_recognition
 import bank_reconciliation
+import tax_reporting
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -195,6 +197,18 @@ class ExtendedHandler(app_runner.AppHandler):
             s=self.require_session(api=True)
             if s:self.send_json(200,bank_reconciliation.overview(s['stockroom_id']))
             return
+        if path=="/api/tax-report":
+            s=self.require_session(api=True)
+            if s:
+                query=parse_qs(parsed.query);self.send_json(200,tax_reporting.report(s['stockroom_id'],query.get('year',[date.today().year])[0],query.get('quarter',[(date.today().month-1)//3+1])[0]))
+            return
+        if path=="/api/tax-report/export":
+            s=self.require_session(api=True)
+            if not s:return
+            try:
+                query=parse_qs(parsed.query);data,name=tax_reporting.export(s,query.get('year',[date.today().year])[0],query.get('quarter',[(date.today().month-1)//3+1])[0]);self.send_response(200);self.send_header('Content-Type','application/zip');self.send_header('Content-Disposition',f'attachment; filename="{name}"');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+            except (ValueError,PermissionError) as exc:self.send_json(400,{"error":str(exc)})
+            return
         if path=="/api/payment-batches/sepa":
             s=self.require_session(api=True)
             if not s:return
@@ -286,6 +300,7 @@ class ExtendedHandler(app_runner.AppHandler):
         handled.update({"/api/payment-settings","/api/payment-batches","/api/payment-batches/approve","/api/payment-batches/cancel","/api/payment-batches/process"})
         handled.add("/api/purchase-invoices/recognize")
         handled.update({"/api/bank-import","/api/bank-transactions/reconcile"})
+        handled.update({"/api/tax-adjustments","/api/tax-adjustments/delete"})
         if path in handled:
             if not self.enforce_origin():return
             s=self.require_platform_admin() if path.startswith('/api/platform-admin/') else self.require_session(api=True)
@@ -295,6 +310,8 @@ class ExtendedHandler(app_runner.AppHandler):
                 if path=="/api/purchase-invoice-policy":self.send_json(200,purchase_invoices.save_policy(s,values));return
                 if path=="/api/bank-import":self.send_json(200,bank_reconciliation.import_file(s,values));return
                 if path=="/api/bank-transactions/reconcile":self.send_json(200,bank_reconciliation.reconcile(s,values));return
+                if path=="/api/tax-adjustments":self.send_json(200,tax_reporting.add_adjustment(s,values));return
+                if path=="/api/tax-adjustments/delete":self.send_json(200,tax_reporting.delete_adjustment(s,values.get('adjustment_id') or ''));return
                 if path=="/api/purchase-invoices/recognize":self.send_json(200,invoice_recognition.recognize(s,values));return
                 if path=="/api/purchase-invoices":self.send_json(200,purchase_invoices.create(s,values));return
                 if path=="/api/purchase-invoices/approve":self.send_json(200,purchase_invoices.decide(s,values,'approve'));return
@@ -380,5 +397,5 @@ class ExtendedHandler(app_runner.AppHandler):
 
 if __name__=="__main__":
     if not server.DATABASE_URL:raise SystemExit("DATABASE_URL is verplicht en moet naar PostgreSQL wijzen.")
-    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();payment_batches.initialize();bank_reconciliation.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
+    server.initialize_database();runner.migrate_roles();dashboard.initialize_enhancements();orders.initialize_order_management();purchase_alternatives.initialize();purchase_receipts.initialize();purchase_invoices.initialize();payment_batches.initialize();bank_reconciliation.initialize();tax_reporting.initialize();order_returns.initialize();business_tools.initialize_business_tools();warehouse.initialize_warehouse_ops();inventory_ledger.initialize();platform_admin.initialize_platform_admin();billing.initialize_billing();account_tools.initialize_account_tools();app_runner.self_test_permissions();server.cleanup_expired()
     handler=partial(ExtendedHandler,directory=str(server.PUBLIC_DIR));httpd=ThreadingHTTPServer((server.HOST,server.PORT),handler);print("Stockroom draait met sessiebeheer, imports, notificatievoorkeuren en SaaS-tools",flush=True);httpd.serve_forever()

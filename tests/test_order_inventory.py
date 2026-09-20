@@ -1,5 +1,7 @@
 import json
 import base64
+import io
+import zipfile
 import os
 import unittest
 import uuid
@@ -16,6 +18,7 @@ import purchase_invoices
 import payment_batches
 import invoice_recognition
 import bank_reconciliation
+import tax_reporting
 import order_returns
 import purchase_intelligence
 import purchase_approvals
@@ -44,6 +47,7 @@ class OrderInventoryTests(unittest.TestCase):
         purchase_invoices.initialize()
         payment_batches.initialize()
         bank_reconciliation.initialize()
+        tax_reporting.initialize()
         order_returns.initialize()
         business_tools.initialize_business_tools()
         billing.initialize_billing()
@@ -368,6 +372,25 @@ class OrderInventoryTests(unittest.TestCase):
         xml = b'''<Document><BkToCstmrStmt><Stmt><Ntry><Amt Ccy="EUR">10.50</Amt><CdtDbtInd>CRDT</CdtDbtInd><BookgDt><Dt>2026-09-20</Dt></BookgDt><AcctSvcrRef>A1</AcctSvcrRef><NtryDtls><TxDtls><Refs><EndToEndId>INV-1</EndToEndId></Refs><RmtInf><Ustrd>Factuur INV-1</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry><Ntry><Amt Ccy="EUR">2.25</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-09-20</Dt></BookgDt><AcctSvcrRef>A2</AcctSvcrRef></Ntry></Stmt></BkToCstmrStmt></Document>'''
         rows = bank_reconciliation.parse_camt(xml)
         self.assertEqual(rows[0]["amount"], 10.5);self.assertEqual(rows[1]["amount"], -2.25)
+
+    def test_tax_report_balances_vat_and_exports_traceable_files(self):
+        sales_id = self.create_order("sales", 1, 100)
+        order_management.update_order_status(self.session, "sales", {"order_id": sales_id, "status": "completed"})
+        documents_v3.ensure_invoice(str(self.room_id), sales_id)
+        supplier_id = order_management.save_relation(self.session, "supplier", {"name": "Btw leverancier"})
+        purchase_id = order_management.create_order(self.session, {"order_type": "purchase", "relation_id": supplier_id, "lines_json": json.dumps([{"item_id": self.item_id, "item_name": "Testitem", "sku": "T-1", "quantity": 1, "unit_price": 100}])})
+        order_management.update_order_status(self.session, "purchase", {"order_id": purchase_id, "status": "ordered"})
+        line = next(row for row in order_management.order_rows(str(self.room_id), "purchase") if row["id"] == purchase_id)["lines"][0]
+        purchase_receipts.receive(self.session, {"order_id": purchase_id, "lines_json": json.dumps([{"line_id": line["id"], "quantity": 1}])})
+        purchase_invoices.create(self.session, {"order_id": purchase_id, "invoice_number": "VAT-1", "invoice_date": date.today().isoformat(), "due_date": date.today().isoformat(), "vat_amount": "21", "lines_json": json.dumps([{"order_line_id": line["id"], "quantity": 1, "unit_price": 100}])})
+        quarter = (date.today().month-1)//3+1
+        report = tax_reporting.report(str(self.room_id), date.today().year, quarter)
+        self.assertEqual(report["summary"]["outputVat"], 21.0);self.assertEqual(report["summary"]["inputVat"], 21.0);self.assertEqual(report["summary"]["payable"], 0.0)
+        tax_reporting.add_adjustment(self.session, {"adjustment_date": date.today().isoformat(), "kind": "output", "net_amount": "0", "vat_amount": "1.50", "reason": "Afrondingscorrectie"})
+        self.assertEqual(tax_reporting.report(str(self.room_id), date.today().year, quarter)["summary"]["payable"], 1.5)
+        archive, name = tax_reporting.export(self.session, date.today().year, quarter)
+        self.assertTrue(name.endswith('.zip'))
+        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:self.assertEqual(set(zipped.namelist()), {'btw-samenvatting.csv','verkoopfacturen.csv','inkoopfacturen.csv','btw-correcties.csv','bankmutaties.csv','controlepunten.csv'})
 
     def test_decimal_quote_invoice_payment_creates_sales_order_without_double_booking(self):
         quote = sales_workflow.create(self.session, {
