@@ -9,7 +9,7 @@
     {id:'relations',label:'Relaties',area:'relations',view:'relations',trigger:'[data-view="relations"]',subviews:['customers','suppliers'],features:['suppliers','customers']},
     {id:'orders',label:'Orders',area:'orders',view:'orders',trigger:'[data-view="orders"]',subviews:['sales-orders','purchase-orders'],features:['purchase-orders','sales-orders','order-approval','supplier-followup','delivery-confirmation']},
     {id:'quotes',label:'Offertes',area:'sales',view:'quotes',trigger:'[data-view="quotes"]',features:['quotes','quote-mail','quote-conversion']},
-    {id:'finance',label:'Facturen',area:'finance',view:'finance',trigger:'[data-view="finance"]',features:['sales-invoices','invoice-trash','debtors','purchase-invoices','payment-batches','bank-reconciliation']},
+    {id:'finance',label:'Facturen',area:'finance',view:'finance',trigger:'[data-view="finance"]',subviews:['sales-invoices','debtors','purchase-invoices','payment-batches','bank-reconciliation'],features:['sales-invoices','invoice-trash','debtors','purchase-invoices','payment-batches','bank-reconciliation']},
     {id:'settings',label:'Instellingen',area:'management',view:'settings',trigger:'[data-view="settings"]',features:['account','organization','documents','members-roles','inventory-settings','notifications-settings','security-integrations','audit-log','billing']},
     {id:'notifications',label:'Meldingen',area:'management',view:'notifications',trigger:'[data-view="notifications"]',features:['notification-center']},
     {id:'platform-admin',label:'Platformbeheer',area:'management',view:'platformAdmin',trigger:'[data-view="platformAdmin"]',features:['platform-status','subscriptions','errors','backup-restore']},
