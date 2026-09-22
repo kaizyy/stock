@@ -1,0 +1,10 @@
+const assert=require('assert');
+const fs=require('fs');
+const source=fs.readFileSync('site_ux.js','utf8');
+const registry=fs.readFileSync('navigation_registry.js','utf8');
+for(const label of ['Account & organisatie','Documenten & facturen','Gebruikers & rechten','Voorraadinstellingen','Meldingen','Beveiliging & koppelingen','Back-up & herstel','Abonnement'])assert(source.includes(label),`Ontbrekende instellingencategorie: ${label}`);
+for(const id of ['account-organization','documents-invoices','users-rights','inventory-settings','notifications-settings','security-integrations','backup-restore','subscription'])assert(registry.includes(id),`Ontbrekend instellingen-subview: ${id}`);
+assert(source.includes("t.includes('uitnodiging')||t.includes('auditlog')"),'Gebruikers, uitnodigingen en audit moeten bij rechten blijven');
+assert(source.includes("t.includes('notific')||t.includes('melding')"),'Meldingen moeten een eigen categorie hebben');
+assert(source.includes('data-open-platform-backup'),'Back-upbeheer moet bereikbaar blijven vanuit Instellingen');
+console.log('Instellingen zijn veilig gebundeld in acht vaste categorieën.');
