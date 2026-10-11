@@ -56,5 +56,11 @@ jobs:
           RESTORE_DATABASE_URL: postgresql://stockroom:test-password@localhost:5432/stockroom_restore
       - name: JavaScript syntax checks
         run: |
-          for f in *.js; do node --check "$f"; done
-          for f in tests/*.test.js; do node "$f"; done
+          for f in *.js; do
+            echo "Syntax controleren: $f"
+            node --check "$f" || { echo "::error file=$f::JavaScript-syntaxiscontrole mislukt"; exit 1; }
+          done
+          for f in tests/*.test.js; do
+            echo "Test uitvoeren: $f"
+            node "$f" || { echo "::error file=$f::JavaScript-regressietest mislukt"; exit 1; }
+          done
