@@ -6,5 +6,8 @@ assert(purge.includes('state.transactions=state.transactions.map'),'gekoppelde t
 assert(!purge.includes('state.transactions=state.transactions.filter'),'definitief verwijderen mag transacties niet wissen');
 for(const field of ['itemName','itemSku','itemBuy','itemSell','itemDeletedAt'])assert(purge.includes(field),`historische transactie mist ${field}`);
 assert(source.includes("i?.name||t.itemName||'Verwijderd item'"),'de opgeslagen artikelnaam moet zichtbaar blijven');
-assert(source.includes('Het artikel is verwijderd; deze transactie blijft bewaard.'),'historische transacties moeten als alleen-lezen herkenbaar zijn');
-console.log('Artikel verwijderen bewaart gekoppelde transacties en hun artikelgegevens.');
+assert(source.includes("const historicalUnpaid=type==='incoming'?!t.paid:!t.done"),'de juiste betaalstatus moet per transactietype worden gebruikt');
+assert(source.includes('alleen de openstaande betaling kan nog worden verwerkt'),'historische transacties moeten verder als alleen-lezen herkenbaar zijn');
+assert(source.includes('historical-payment-action'),'een openstaande historische betaling moet betaalbaar blijven');
+assert(source.includes('historicalPayment?'),'de betaalactie moet verdwijnen zodra de historische transactie betaald is');
+console.log('Artikel verwijderen bewaart transacties; alleen openstaande betalingen blijven verwerkbaar.');
