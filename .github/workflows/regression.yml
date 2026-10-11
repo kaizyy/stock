@@ -62,5 +62,12 @@ jobs:
           done
           for f in tests/*.test.js; do
             echo "Test uitvoeren: $f"
-            node "$f" || { echo "::error file=$f::JavaScript-regressietest mislukt"; exit 1; }
+            if ! output=$(node "$f" 2>&1); then
+              output="${output//'%'/'%25'}"
+              output="${output//$'\r'/'%0D'}"
+              output="${output//$'\n'/'%0A'}"
+              echo "::error file=$f::$output"
+              exit 1
+            fi
+            echo "$output"
           done
