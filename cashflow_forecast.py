@@ -50,7 +50,7 @@ def _manual_events(state, today):
         try:amount=round(float(transaction.get('qty') or 0)*float(transaction.get('price') or 0),2);when=_clamp_day(transaction.get('date'),today)
         except (TypeError,ValueError):continue
         if amount<=0:continue
-        item=items.get(str(transaction.get('itemId'))) or {};party=(transaction.get('party') or '').strip();item_name=item.get('name') or item.get('sku') or 'artikel'
+        item=items.get(str(transaction.get('itemId'))) or {};party=(transaction.get('party') or '').strip();item_name=item.get('name') or transaction.get('itemName') or item.get('sku') or transaction.get('itemSku') or 'verwijderd artikel'
         events.append({'date':when,'kind':'manual_purchase' if kind=='incoming' else 'manual_sale','direction':'out' if kind=='incoming' else 'in',
             'label':f"Losse {'inkoop' if kind=='incoming' else 'verkoop'} · {party or item_name}",'amount':amount,'certainty':1.0,
             'transactionId':str(transaction.get('id') or '')})

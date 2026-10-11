@@ -1,0 +1,10 @@
+const assert=require('assert');
+const fs=require('fs');
+const source=fs.readFileSync('app.js','utf8');
+const purge=source.match(/function purgeItem\(id\)\{.*?\}\n/)?.[0]||'';
+assert(purge.includes('state.transactions=state.transactions.map'),'gekoppelde transacties moeten worden verrijkt, niet verwijderd');
+assert(!purge.includes('state.transactions=state.transactions.filter'),'definitief verwijderen mag transacties niet wissen');
+for(const field of ['itemName','itemSku','itemBuy','itemSell','itemDeletedAt'])assert(purge.includes(field),`historische transactie mist ${field}`);
+assert(source.includes("i?.name||t.itemName||'Verwijderd item'"),'de opgeslagen artikelnaam moet zichtbaar blijven');
+assert(source.includes('Het artikel is verwijderd; deze transactie blijft bewaard.'),'historische transacties moeten als alleen-lezen herkenbaar zijn');
+console.log('Artikel verwijderen bewaart gekoppelde transacties en hun artikelgegevens.');
