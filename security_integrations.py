@@ -86,7 +86,8 @@ def start_totp(session):
     qr=qr.make_image(fill_color='black',back_color='white').convert('RGB')
     size=qr.width
     logo_size=int(size*0.25)
-    logo=Image.new('RGB',(logo_size,logo_size),'white')
+    # Overlay only the golden ring and letter; keep QR modules visible elsewhere.
+    logo=Image.new('RGBA',(logo_size,logo_size),(0,0,0,0))
     draw=ImageDraw.Draw(logo)
     pad=max(3,logo_size//24)
     ring_width=max(5,logo_size//17)
@@ -107,7 +108,7 @@ def start_totp(session):
     draw.text((logo_size/2,logo_size/2),'V',font=font,fill='#a77b34',anchor='mm',stroke_width=1,stroke_fill='#9c722d')
     draw.text((logo_size/2,logo_size/2-2),'V',font=font,fill='#e9cf91',anchor='mm')
     pos=((size-logo_size)//2,(size-logo_size)//2)
-    qr.paste(logo,pos)
+    qr.paste(logo,pos,logo)
     output=io.BytesIO()
     qr.save(output,format='PNG')
     encoded=base64.b64encode(output.getvalue()).decode('ascii')
