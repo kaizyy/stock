@@ -85,14 +85,27 @@ def start_totp(session):
     qr.make(fit=True)
     qr=qr.make_image(fill_color='black',back_color='white').convert('RGB')
     size=qr.width
-    logo_size=int(size*0.24)
-    logo=Image.new('RGBA',(logo_size,logo_size),'white')
+    logo_size=int(size*0.25)
+    logo=Image.new('RGB',(logo_size,logo_size),'white')
     draw=ImageDraw.Draw(logo)
-    gold='#cba35e'
-    pad=max(2,logo_size//16)
-    draw.ellipse((pad,pad,logo_size-pad-1,logo_size-pad-1),outline=gold,width=max(2,logo_size//22))
-    font=ImageFont.load_default(size=int(logo_size*0.57))
-    draw.text((logo_size/2,logo_size/2),'V',font=font,fill='#f0dfb9',anchor='mm')
+    pad=max(3,logo_size//24)
+    ring_width=max(5,logo_size//17)
+    bounds=(pad+2,pad+2,logo_size-pad-3,logo_size-pad-3)
+    draw.ellipse(bounds,outline='#a97927',width=ring_width+2)
+    inner=(bounds[0]+2,bounds[1]+2,bounds[2]-2,bounds[3]-2)
+    draw.ellipse(inner,outline='#d5aa59',width=ring_width-1)
+    highlight=(inner[0]+2,inner[1]+2,inner[2]-2,inner[3]-2)
+    draw.arc(highlight,195,325,fill='#f8e1a0',width=max(2,ring_width//3))
+    font_paths=(
+        '/usr/share/fonts/ttf-dejavu/DejaVuSerif.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf',
+        '/usr/share/fonts/TTF/DejaVuSerif.ttf',
+    )
+    font=next((ImageFont.truetype(p,int(logo_size*0.67)) for p in font_paths if os.path.exists(p)),None)
+    if font is None:
+        font=ImageFont.load_default(size=int(logo_size*0.63))
+    draw.text((logo_size/2,logo_size/2),'V',font=font,fill='#a77b34',anchor='mm',stroke_width=1,stroke_fill='#9c722d')
+    draw.text((logo_size/2,logo_size/2-2),'V',font=font,fill='#e9cf91',anchor='mm')
     pos=((size-logo_size)//2,(size-logo_size)//2)
     qr.paste(logo,pos)
     output=io.BytesIO()
