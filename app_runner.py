@@ -214,7 +214,10 @@ class AppHandler(dashboard.DashboardHandler):
             if not user["email_verified_at"]:
                 self.send_json(403, {"error": "Verifieer eerst je e-mailadres."})
                 return
-            if user["totp_enabled_at"] and user["totp_secret_encrypted"]:
+            if user["totp_enabled_at"]:
+                if not user["totp_secret_encrypted"]:
+                    self.send_json(403, {"error": "Tweestapsverificatie is niet beschikbaar. Neem contact op met de beheerder."})
+                    return
                 code = form.get("totp", [""])[0]
                 if not security_2fa.verify_totp(security_2fa.decrypt_secret(user["totp_secret_encrypted"]), code):
                     self.send_json(403, {"error": "Authenticatorcode ontbreekt of is onjuist."})

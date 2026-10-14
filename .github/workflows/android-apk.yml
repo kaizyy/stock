@@ -29,7 +29,7 @@ jobs:
 
       - name: Python syntax and regression checks
         run: |
-          python -m pip install "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5"
+          python -m pip install "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5" "cryptography>=44,<47" "qrcode>=8,<9"
           python -m py_compile *.py tools/*.py tests/*.py
           python tools/regression_check.py
           python -m unittest discover -s tests -v

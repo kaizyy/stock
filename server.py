@@ -296,7 +296,7 @@ def login_page(error="", success=""):
     body = """
 <form method="post" action="/login">
 <label>E-mailadres<input name="email" type="email" autocomplete="email" required autofocus></label>
-<label>Wachtwoord<input name="password" type="password" autocomplete="current-password" required></label><label>Authenticatorcode (alleen bij 2FA)<input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code"></label>
+<label>Wachtwoord<input name="password" type="password" autocomplete="current-password" required></label>
 <button type="submit">Inloggen</button></form>
 <p class="note"><a href="/forgot-password">Wachtwoord vergeten?</a><br>
 Nog geen account? <a href="/register">Registreer een eigen stockroom</a><br>
@@ -615,6 +615,9 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if path == "/2fa":
+            self.redirect("/login")
+            return
         if path == "/login":
             self.redirect("/") if self.current_session() else self.send_html(200, login_page())
             return
@@ -736,48 +739,12 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/login":
-            form = self.form_data()
-            if not form:
-                self.send_html(400, login_page("Ongeldige aanvraag."))
-                return
-            email = form.get("email", [""])[0].strip().lower()
-            password = form.get("password", [""])[0]
-            if not self.rate_limit("login", email, 10, 900):
-                self.send_html(429, login_page("Te veel inlogpogingen. Probeer het later opnieuw."))
-                return
-            with db() as conn:
-                user = conn.execute("SELECT * FROM users WHERE email=%s", (email,)).fetchone()
-                locked = user and user["locked_until"] and user["locked_until"].timestamp() > time.time()
-                valid = user and not locked and verify_password(password, user["password_salt"], user["password_hash"], user.get("password_version", 1))
-                if not valid:
-                    if user and not locked:
-                        conn.execute("""UPDATE users SET failed_login_attempts=failed_login_attempts+1,
-                          locked_until=CASE WHEN failed_login_attempts+1 >= %s THEN NOW()+(%s*INTERVAL '1 second') ELSE locked_until END
-                          WHERE id=%s""", (LOGIN_MAX_ATTEMPTS, LOGIN_LOCK_SECONDS, user["id"]))
-                        conn.commit()
-                    self.send_html(401, login_page("E-mailadres of wachtwoord is onjuist."))
-                    return
-                conn.execute("UPDATE users SET failed_login_attempts=0,locked_until=NULL WHERE id=%s", (user["id"],))
-                if int(user.get("password_version", 1)) < 2:
-                    salt, digest = hash_password(password)
-                    conn.execute("UPDATE users SET password_salt=%s,password_hash=%s,password_version=2 WHERE id=%s", (salt, digest, user["id"]))
-                conn.commit()
-                if user["email_verified_at"] is None:
-                    self.send_html(403, login_page("Verifieer eerst je e-mailadres. Je kunt een nieuwe verificatielink aanvragen."))
-                    return
-                membership = conn.execute("""
-                    SELECT stockroom_id::text,role FROM memberships WHERE user_id=%s
-                    ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,created_at LIMIT 1
-                """, (user["id"],)).fetchone()
-                if membership:
-                    audit_user_action(conn, user["id"], "account.login")
-                    conn.commit()
-            if not membership:
-                self.send_html(403, login_page("Dit account heeft geen stockroomtoegang."))
-                return
-            token, _ = create_session(str(user["id"]), membership["stockroom_id"])
-            self.redirect("/", token=token)
-            return
+            import security_integrations
+            return security_integrations._custom_login(self)
+
+        if path == "/2fa":
+            import security_integrations
+            return security_integrations._complete_twofa(self)
 
         if path == "/register":
             form = self.form_data()

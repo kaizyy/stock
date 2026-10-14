@@ -16,13 +16,15 @@ class SecurityIntegrationTests(unittest.TestCase):
             self.assertFalse(sec.verify_totp(secret,'000000' if code!='000000' else '999999'))
 
     def test_secret_encryption_roundtrip_and_tamper_detection(self):
-        token=sec.encrypt_secret('TOPSECRET')
-        self.assertEqual(sec.decrypt_secret(token),'TOPSECRET')
-        raw=bytearray(__import__('base64').urlsafe_b64decode(token.encode()))
-        raw[-1]^=1
-        tampered=__import__('base64').urlsafe_b64encode(bytes(raw)).decode()
-        with self.assertRaises(ValueError):
-            sec.decrypt_secret(tampered)
+        from cryptography.exceptions import InvalidTag
+        with mock.patch.dict(os.environ, SECURITY_ENCRYPTION_KEY='ab'*32):
+            token=sec.encrypt_secret('TOPSECRET')
+            self.assertEqual(sec.decrypt_secret(token),'TOPSECRET')
+            raw=bytearray(__import__('base64').b64decode(token[3:]))
+            raw[-1]^=1
+            tampered='v2:'+__import__('base64').b64encode(bytes(raw)).decode()
+            with self.assertRaises(InvalidTag):
+                sec.decrypt_secret(tampered)
 
     def test_api_auth_requires_scope_and_is_tenant_bound_to_key(self):
         class Headers(dict):

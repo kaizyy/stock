@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import io
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
+from cryptography.exceptions import InvalidTag
 import server
 import security_2fa
 
@@ -46,6 +47,7 @@ def initialize_security():
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled_at TIMESTAMPTZ")
         conn.execute("""CREATE TABLE IF NOT EXISTS login_history(id BIGSERIAL PRIMARY KEY,user_id UUID REFERENCES users(id) ON DELETE CASCADE,success BOOLEAN NOT NULL,ip_address TEXT NOT NULL DEFAULT '',user_agent TEXT NOT NULL DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
         conn.execute("""CREATE TABLE IF NOT EXISTS twofa_challenges(token_hash TEXT PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,expires_at TIMESTAMPTZ NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
+        conn.execute("ALTER TABLE twofa_challenges ADD COLUMN IF NOT EXISTS password_hash BYTEA")
         conn.execute("""CREATE TABLE IF NOT EXISTS api_keys(id UUID PRIMARY KEY,stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,created_by UUID REFERENCES users(id) ON DELETE SET NULL,name TEXT NOT NULL,key_hash TEXT NOT NULL UNIQUE,key_prefix TEXT NOT NULL,scopes TEXT[] NOT NULL DEFAULT ARRAY['read']::text[],last_used_at TIMESTAMPTZ,revoked_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
         conn.execute("""CREATE TABLE IF NOT EXISTS webhooks(id UUID PRIMARY KEY,stockroom_id UUID NOT NULL REFERENCES stockrooms(id) ON DELETE CASCADE,created_by UUID REFERENCES users(id) ON DELETE SET NULL,name TEXT NOT NULL,url TEXT NOT NULL,event_types TEXT[] NOT NULL DEFAULT ARRAY['state.changed']::text[],secret TEXT NOT NULL,enabled BOOLEAN NOT NULL DEFAULT TRUE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
         conn.execute("""CREATE TABLE IF NOT EXISTS webhook_deliveries(id BIGSERIAL PRIMARY KEY,webhook_id UUID REFERENCES webhooks(id) ON DELETE CASCADE,event_type TEXT NOT NULL,status_code INTEGER,error TEXT NOT NULL DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
@@ -185,7 +187,48 @@ def api_auth(handler,scope='read'):
 
 def twofa_page(challenge,error=''):
     safe=html.escape(challenge,quote=True); feedback=f'<p class="error">{html.escape(error)}</p>' if error else ''
-    return server.auth_page('Tweestapsverificatie','Voer de 6-cijferige code uit je authenticator-app in.',feedback+f'<form method="post" action="/2fa"><input type="hidden" name="challenge" value="{safe}"><label>Verificatiecode<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">Verifiëren</button></form>')
+    return server.auth_page('Tweestapsverificatie','Je inloggegevens zijn gecontroleerd. Voer de 6-cijferige code uit je authenticator-app in.',feedback+f'<form method="post" action="/2fa"><input type="hidden" name="challenge" value="{safe}"><label>Verificatiecode<input name="code" inputmode="numeric" pattern="[0-9]{{6}}" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">Verifiëren</button></form><p class="note"><a href="/login">Opnieuw inloggen</a></p>')
+
+
+def _complete_twofa(handler):
+    form = handler.form_data() or {}
+    raw = form.get('challenge', [''])[0]
+    code = form.get('code', [''])[0]
+    if not raw or len(raw) > 128:
+        handler.send_html(400, server.login_page('Deze verificatiepoging is ongeldig of verlopen. Log opnieuw in.'))
+        return
+    digest = server.token_digest(raw)
+    # Keep the row locked through verification and consumption. Concurrent requests
+    # must never turn one password challenge into multiple authenticated sessions.
+    with server.db() as conn:
+        row = conn.execute("""
+            SELECT c.user_id,c.stockroom_id,u.totp_secret_encrypted
+            FROM twofa_challenges c JOIN users u ON u.id=c.user_id
+            JOIN memberships m ON m.user_id=c.user_id AND m.stockroom_id=c.stockroom_id
+            WHERE c.token_hash=%s AND c.expires_at>NOW() AND c.attempts<5
+              AND c.password_hash=u.password_hash AND u.email_verified_at IS NOT NULL
+              AND u.totp_enabled_at IS NOT NULL AND u.totp_secret_encrypted IS NOT NULL
+              AND (u.locked_until IS NULL OR u.locked_until<=NOW())
+            FOR UPDATE OF c,u,m
+        """, (digest,)).fetchone()
+        if not row:
+            handler.send_html(400, server.login_page('Deze verificatiepoging is ongeldig of verlopen. Log opnieuw in.'))
+            return
+        conn.execute('UPDATE twofa_challenges SET attempts=attempts+1 WHERE token_hash=%s', (digest,))
+        try:
+            valid = verify_totp(decrypt_secret(row['totp_secret_encrypted']), code)
+        except (ValueError, InvalidTag):
+            valid = False
+        if valid:
+            conn.execute('DELETE FROM twofa_challenges WHERE token_hash=%s', (digest,))
+        conn.commit()
+    if not valid:
+        record_login(row['user_id'], False, handler)
+        handler.send_html(401, twofa_page(raw, 'De verificatiecode is ongeldig.'))
+        return
+    record_login(row['user_id'], True, handler)
+    token, _ = server.create_session(str(row['user_id']), str(row['stockroom_id']))
+    handler.redirect('/', token=token)
 
 def _custom_login(handler):
     form=handler.form_data()
@@ -198,14 +241,25 @@ def _custom_login(handler):
             if user and not locked:conn.execute("UPDATE users SET failed_login_attempts=failed_login_attempts+1,locked_until=CASE WHEN failed_login_attempts+1 >= %s THEN NOW()+(%s*INTERVAL '1 second') ELSE locked_until END WHERE id=%s",(server.LOGIN_MAX_ATTEMPTS,server.LOGIN_LOCK_SECONDS,user['id']));conn.commit()
             if user:record_login(user['id'],False,handler)
             handler.send_html(401,server.login_page('E-mailadres of wachtwoord is onjuist.'));return
-        conn.execute('UPDATE users SET failed_login_attempts=0,locked_until=NULL WHERE id=%s',(user['id'],));conn.commit()
+        conn.execute('UPDATE users SET failed_login_attempts=0,locked_until=NULL WHERE id=%s',(user['id'],))
+        if int(user.get('password_version',1)) < 2:
+            salt,digest=server.hash_password(password)
+            conn.execute('UPDATE users SET password_salt=%s,password_hash=%s,password_version=2 WHERE id=%s',(salt,digest,user['id']))
+            user['password_hash']=digest
+        conn.commit()
         if user['email_verified_at'] is None:handler.send_html(403,server.login_page('Verifieer eerst je e-mailadres.'));return
         membership=conn.execute("SELECT stockroom_id::text,role FROM memberships WHERE user_id=%s ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,created_at LIMIT 1",(user['id'],)).fetchone()
     if not membership:handler.send_html(403,server.login_page('Dit account heeft geen stockroomtoegang.'));return
-    if user.get('totp_enabled_at') and user.get('totp_secret_encrypted'):
+    if user.get('totp_enabled_at'):
+        if not user.get('totp_secret_encrypted'):
+            handler.send_html(403,server.login_page('Tweestapsverificatie is niet beschikbaar. Neem contact op met de beheerder.'));return
         raw=secrets.token_urlsafe(32)
-        with server.db() as conn:conn.execute("DELETE FROM twofa_challenges WHERE user_id=%s",(user['id'],));conn.execute("INSERT INTO twofa_challenges(token_hash,user_id,stockroom_id,expires_at) VALUES(%s,%s,%s,NOW()+INTERVAL '5 minutes')",(server.token_digest(raw),user['id'],membership['stockroom_id']));conn.commit()
-        handler.redirect('/2fa?challenge='+urllib.parse.quote(raw));return
+        with server.db() as conn:
+            conn.execute("DELETE FROM twofa_challenges WHERE user_id=%s OR expires_at<=NOW()",(user['id'],))
+            conn.execute("INSERT INTO twofa_challenges(token_hash,user_id,stockroom_id,expires_at,password_hash) VALUES(%s,%s,%s,NOW()+INTERVAL '5 minutes',%s)",(server.token_digest(raw),user['id'],membership['stockroom_id'],user['password_hash']))
+            conn.commit()
+        # Render directly: the bearer challenge stays out of URLs, history and logs.
+        handler.send_html(200,twofa_page(raw));return
     record_login(user['id'],True,handler);token,_=server.create_session(str(user['id']),membership['stockroom_id']);handler.redirect('/',token=token)
 
 def install():
@@ -214,8 +268,8 @@ def install():
     _installed=True;initialize_security()
     old_get=server.StockroomHandler.do_GET;old_post=server.StockroomHandler.do_POST
     def do_GET(self):
-        path=urllib.parse.urlparse(self.path).path;q=urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        if path=='/2fa':self.send_html(200,twofa_page(q.get('challenge',[''])[0]));return
+        path=urllib.parse.urlparse(self.path).path
+        if path=='/2fa':self.redirect('/login');return
         if path=='/api/security/overview':
             s=self.require_session(api=True)
             if s:self.send_json(200,overview(s))
@@ -233,14 +287,7 @@ def install():
             return _custom_login(self)
         if path=='/2fa':
             if not self.enforce_origin():return
-            f=self.form_data() or {};raw=f.get('challenge',[''])[0];code=f.get('code',[''])[0]
-            with server.db() as conn:
-                row=conn.execute("SELECT c.user_id,c.stockroom_id,u.totp_secret_encrypted FROM twofa_challenges c JOIN users u ON u.id=c.user_id WHERE c.token_hash=%s AND c.expires_at>NOW() AND c.attempts<5 FOR UPDATE",(server.token_digest(raw),)).fetchone()
-                if not row:self.send_html(400,twofa_page(raw,'Deze verificatiepoging is verlopen.'));return
-                conn.execute('UPDATE twofa_challenges SET attempts=attempts+1 WHERE token_hash=%s',(server.token_digest(raw),));conn.commit()
-            if not verify_totp(decrypt_secret(row['totp_secret_encrypted']),code):self.send_html(401,twofa_page(raw,'De verificatiecode is ongeldig.'));return
-            with server.db() as conn:conn.execute('DELETE FROM twofa_challenges WHERE token_hash=%s',(server.token_digest(raw),));conn.commit()
-            record_login(row['user_id'],True,self);token,_=server.create_session(str(row['user_id']),str(row['stockroom_id']));self.redirect('/',token=token);return
+            return _complete_twofa(self)
         secpaths={'/api/security/totp/start','/api/security/totp/confirm','/api/security/totp/disable','/api/security/api-keys/create','/api/security/api-keys/revoke','/api/security/webhooks/create','/api/security/webhooks/delete'}
         if path in secpaths:
             if not self.enforce_origin():return

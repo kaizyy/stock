@@ -41,6 +41,8 @@ De native Kotlin/Jetpack Compose-client staat in `android/`. De Android-app gebr
 
 Mobiele authenticatie gebruikt `/api/mobile/login`; daarna gebruikt de app de bestaande `/api/me` en `/api/state` endpoints. De sessieduur blijft maximaal 30 minuten.
 
+De huidige Android-app opent de website in een WebView en gebruikt daardoor dezelfde tweestapslogin als de browser. Het eerste formulier vraagt alleen e-mailadres en wachtwoord. Bij ingeschakelde 2FA verschijnt pas na correcte, geverifieerde inloggegevens het authenticatorformulier. Er ontstaat pas een sessie na een correcte TOTP-code. De eenmalige challenge is vijf minuten geldig, staat alleen gehasht in de database en accepteert maximaal vijf codepogingen; hij staat niet in de URL. Een wachtwoordwijziging, ingetrokken stockroomtoegang of uitgeschakelde 2FA maakt de challenge ongeldig. De oudere mobiele API blijft compatibel met het `totp`-veld en geeft zonder correcte code geen sessietoken terug.
+
 Stel voor het bouwen de publieke Stockroom-URL in:
 
 ```bash
