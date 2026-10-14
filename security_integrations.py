@@ -91,7 +91,7 @@ def start_totp(session):
     gold='#cba35e'
     pad=max(2,logo_size//16)
     draw.ellipse((pad,pad,logo_size-pad-1,logo_size-pad-1),outline=gold,width=max(2,logo_size//22))
-    font=ImageFont.truetype('/usr/share/fonts/TTF/DejaVuSerif.ttf',int(logo_size*0.57))
+    font=ImageFont.load_default(size=int(logo_size*0.57))
     draw.text((logo_size/2,logo_size/2),'V',font=font,fill='#f0dfb9',anchor='mm')
     pos=((size-logo_size)//2,(size-logo_size)//2)
     qr.paste(logo,pos)
