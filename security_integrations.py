@@ -1,6 +1,8 @@
 import base64, hashlib, hmac, html, ipaddress, json, os, secrets, socket, struct, time, urllib.parse, urllib.request, uuid
 from datetime import datetime, timezone
 
+import io
+import qrcode
 import server
 import security_2fa
 
@@ -76,7 +78,12 @@ def start_totp(session):
     with server.db() as conn: conn.execute("UPDATE users SET totp_pending_encrypted=%s WHERE id=%s",(enc,session['user_id']));conn.commit()
     label=urllib.parse.quote(f"Stockroom:{session['email']}")
     issuer=urllib.parse.quote('Stockroom')
-    return {'secret':secret,'otpauth_uri':f'otpauth://totp/{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30'}
+    uri=f'otpauth://totp/{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30'
+    qr=qrcode.make(uri)
+    output=io.BytesIO()
+    qr.save(output,format='PNG')
+    encoded=base64.b64encode(output.getvalue()).decode('ascii')
+    return {'secret':secret,'otpauth_uri':uri,'qr_data_url':'data:image/png;base64,'+encoded}
 
 def confirm_totp(session,code):
     with server.db() as conn:
