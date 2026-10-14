@@ -85,8 +85,8 @@ def start_totp(session):
     qr.make(fit=True)
     qr=qr.make_image(fill_color='black',back_color='white').convert('RGB')
     size=qr.width
-    logo_size=int(size*0.17)
-    logo=Image.new('RGB',(logo_size,logo_size),'#151515')
+    logo_size=int(size*0.24)
+    logo=Image.new('RGBA',(logo_size,logo_size),(0,0,0,0))
     draw=ImageDraw.Draw(logo)
     gold='#cba35e'
     pad=max(2,logo_size//16)
@@ -94,7 +94,7 @@ def start_totp(session):
     font=ImageFont.load_default(size=int(logo_size*0.57))
     draw.text((logo_size/2,logo_size/2),'V',font=font,fill='#f0dfb9',anchor='mm')
     pos=((size-logo_size)//2,(size-logo_size)//2)
-    qr.paste(logo,pos)
+    qr.paste(logo,pos,logo)
     output=io.BytesIO()
     qr.save(output,format='PNG')
     encoded=base64.b64encode(output.getvalue()).decode('ascii')
