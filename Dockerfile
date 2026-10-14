@@ -19,7 +19,7 @@ COPY cashflow_forecast_ui.js /app/public/
 COPY cashflow_action_navigation.js /app/public/
 COPY budget_planning_ui.js /app/public/
 
-RUN apk add --no-cache curl su-exec postgresql-client tesseract-ocr tesseract-ocr-data-nld tesseract-ocr-data-eng \
+RUN apk add --no-cache font-dejavu curl su-exec postgresql-client tesseract-ocr tesseract-ocr-data-nld tesseract-ocr-data-eng \
     && pip install --no-cache-dir "cryptography>=44,<47" "psycopg[binary]>=3.2,<4" "reportlab>=4.2,<5" "pypdf>=5,<7" "pillow>=11,<13" "pytesseract>=0.3.13,<1" "qrcode>=8,<9"
 
 COPY security_2fa.py server.py runner.py dashboard_runner.py app_runner.py order_management.py order_delete.py purchase_receipts.py order_returns.py purchase_intelligence.py purchase_approvals.py supplier_portal.py purchase_alternatives.py warehouse_ops.py business_tools.py platform_admin.py billing.py account_tools.py email_events.py security_integrations.py backup_status.py backup_restore_admin.py documents_v2.py documents_v3.py financial_workflow.py debtor_management.py sales_workflow.py csrf_auth_fix.py v11_integrations.py stockroom_settings.py extended_runner.py inventory_ledger.py inventory_reconciliation.py /app/
