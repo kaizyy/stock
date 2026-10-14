@@ -3,7 +3,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import server
-import security_2fa
+import security_integrations as security_2fa
 import runner
 import dashboard_runner as dashboard
 
@@ -18,7 +18,7 @@ def security_page(session, message="", error="", setup_secret=""):
         <label>Huidig wachtwoord<input name="password" type="password" autocomplete="current-password" required></label>
         <button type="submit">Verificatie naar nieuw adres sturen</button>
       </form>
-      <p class="note">Tweestapsverificatie: beheer via onderstaande formulieren.</p>
+      <h3>Tweestapsverificatie (2FA)</h3><p class="note">Gebruik een authenticator-app. De instelling geldt ook voor mobiele toegang.</p>
       <form method="post" action="/account/2fa/start"><button type="submit">Authenticator instellen</button></form>
       <form method="post" action="/account/2fa/confirm"><label>Bevestigingscode<input name="totp" inputmode="numeric" pattern="[0-9]{6}" required></label><button type="submit">2FA activeren</button></form>
       <form method="post" action="/account/2fa/disable"><label>Huidig wachtwoord<input type="password" name="password" required></label><label>Authenticatorcode<input name="totp" inputmode="numeric" pattern="[0-9]{6}" required></label><button type="submit">2FA uitschakelen</button></form>
@@ -126,49 +126,30 @@ class AppHandler(dashboard.DashboardHandler):
                 self.send_html(429, security_page(session, error="Te veel pogingen."))
                 return
             form = self.form_data() or {}
-            with server.db() as conn:
-                user = conn.execute("SELECT * FROM users WHERE id=%s FOR UPDATE", (session["user_id"],)).fetchone()
-                if path == "/account/2fa/start":
-                    if user["totp_secret_enc"]:
-                        self.send_html(409, security_page(session, error="2FA is al ingeschakeld."))
-                        return
-                    try:
-                        secret = security_2fa.new_secret()
-                        encrypted = security_2fa.encrypt(secret)
-                    except ValueError:
-                        self.send_html(503, security_page(session, error="Stel eerst SECURITY_ENCRYPTION_KEY in Coolify in."))
-                        return
-                    conn.execute("UPDATE users SET totp_pending_enc=%s WHERE id=%s", (encrypted, session["user_id"]))
-                    conn.commit()
-                    uri = security_2fa.uri(secret, user["email"])
-                    self.send_html(200, security_page(session, message="Voeg de sleutel toe aan je authenticator en bevestig daarna met een code.", setup_secret=secret))
+            try:
+                if path.endswith("/start"):
+                    with server.db() as conn:
+                        row = conn.execute("SELECT totp_enabled_at FROM users WHERE id=%s", (session["user_id"],)).fetchone()
+                    if row["totp_enabled_at"]:
+                        raise ValueError("2FA is al ingeschakeld.")
+                    result = security_2fa.start_totp(session)
+                    self.send_html(200, security_page(session, message="Voeg deze sleutel toe aan je authenticator en bevestig met een code.", setup_secret=result["secret"]))
                     return
-                if path == "/account/2fa/confirm":
-                    if user["totp_secret_enc"] or not user["totp_pending_enc"]:
-                        self.send_html(400, security_page(session, error="Start eerst de 2FA-instelling."))
-                        return
-                    secret = security_2fa.decrypt(user["totp_pending_enc"])
-                    step = security_2fa.verify(secret, form.get("totp", [""])[0])
-                    if step is None:
-                        self.send_html(403, security_page(session, error="Code is onjuist."))
-                        return
-                    conn.execute("UPDATE users SET totp_secret_enc=totp_pending_enc,totp_pending_enc=NULL,totp_last_step=%s WHERE id=%s", (step, session["user_id"]))
-                    conn.commit()
+                if path.endswith("/confirm"):
+                    security_2fa.confirm_totp(session, form.get("totp", [""])[0])
                     self.send_html(200, security_page(session, message="2FA is ingeschakeld."))
                     return
-                password = form.get("password", [""])[0]
-                supplied = form.get("totp", [""])[0]
-                if not user["totp_secret_enc"] or not server.verify_password(password, user["password_salt"], user["password_hash"], user["password_version"]):
-                    self.send_html(403, security_page(session, error="Verificatie mislukt."))
-                    return
-                step = security_2fa.verify(security_2fa.decrypt(user["totp_secret_enc"]), supplied, user["totp_last_step"])
-                if step is None:
-                    self.send_html(403, security_page(session, error="Code is onjuist of al gebruikt."))
-                    return
-                conn.execute("UPDATE users SET totp_secret_enc=NULL,totp_pending_enc=NULL,totp_last_step=-1 WHERE id=%s", (session["user_id"],))
-                conn.execute("DELETE FROM sessions WHERE user_id=%s", (session["user_id"],))
-                conn.commit()
-            self.redirect("/login", clear_cookie=True)
+                with server.db() as conn:
+                    user = conn.execute("SELECT password_salt,password_hash,password_version FROM users WHERE id=%s", (session["user_id"],)).fetchone()
+                if not server.verify_password(form.get("password", [""])[0], user["password_salt"], user["password_hash"], user["password_version"]):
+                    raise ValueError("Wachtwoord onjuist.")
+                security_2fa.disable_totp(session, form.get("totp", [""])[0])
+                with server.db() as conn:
+                    conn.execute("DELETE FROM sessions WHERE user_id=%s", (session["user_id"],))
+                    conn.commit()
+                self.redirect("/login", clear_cookie=True)
+            except ValueError as exc:
+                self.send_html(400, security_page(session, error=str(exc)))
             return
 
         if path == "/account/logout-all":
@@ -223,7 +204,7 @@ class AppHandler(dashboard.DashboardHandler):
                 return
             with server.db() as conn:
                 user = conn.execute(
-                    "SELECT id::text,email,name,password_salt,password_hash,password_version,email_verified_at,locked_until,totp_secret_enc,totp_last_step FROM users WHERE email=%s",
+                    "SELECT id::text,email,name,password_salt,password_hash,password_version,email_verified_at,locked_until,totp_secret_encrypted,totp_enabled_at FROM users WHERE email=%s",
                     (email,),
                 ).fetchone()
             locked = user and user["locked_until"] and user["locked_until"].timestamp() > server.time.time()
@@ -233,17 +214,11 @@ class AppHandler(dashboard.DashboardHandler):
             if not user["email_verified_at"]:
                 self.send_json(403, {"error": "Verifieer eerst je e-mailadres."})
                 return
-            if user["totp_secret_enc"]:
-                step = security_2fa.verify(security_2fa.decrypt(user["totp_secret_enc"]), form.get("totp", [""])[0], user["totp_last_step"])
-                if step is None:
+            if user["totp_enabled_at"] and user["totp_secret_encrypted"]:
+                code = form.get("totp", [""])[0]
+                if not security_2fa.verify_totp(security_2fa.decrypt_secret(user["totp_secret_encrypted"]), code):
                     self.send_json(403, {"error": "Authenticatorcode ontbreekt of is onjuist."})
                     return
-                with server.db() as conn:
-                    updated = conn.execute("UPDATE users SET totp_last_step=%s WHERE id=%s AND totp_last_step<%s RETURNING id", (step, user["id"], step)).fetchone()
-                    if not updated:
-                        self.send_json(403, {"error": "Authenticatorcode is al gebruikt."})
-                        return
-                    conn.commit()
             memberships = self.memberships_for(user["id"])
             if not memberships:
                 self.send_json(403, {"error": "Dit account is niet gekoppeld aan een stockroom."})
