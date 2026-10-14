@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import psycopg
+import security_2fa
 from psycopg.rows import dict_row
 
 HOST = "0.0.0.0"
@@ -70,6 +71,9 @@ def initialize_database():
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_version SMALLINT NOT NULL DEFAULT 1")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret_enc TEXT")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_pending_enc TEXT")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT NOT NULL DEFAULT -1")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS stockrooms (
                     id UUID PRIMARY KEY,
@@ -296,7 +300,7 @@ def login_page(error="", success=""):
     body = """
 <form method="post" action="/login">
 <label>E-mailadres<input name="email" type="email" autocomplete="email" required autofocus></label>
-<label>Wachtwoord<input name="password" type="password" autocomplete="current-password" required></label>
+<label>Wachtwoord<input name="password" type="password" autocomplete="current-password" required></label><label>Authenticatorcode (alleen bij 2FA)<input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code"></label>
 <button type="submit">Inloggen</button></form>
 <p class="note"><a href="/forgot-password">Wachtwoord vergeten?</a><br>
 Nog geen account? <a href="/register">Registreer een eigen stockroom</a><br>
@@ -775,6 +779,17 @@ class StockroomHandler(SimpleHTTPRequestHandler):
             if not membership:
                 self.send_html(403, login_page("Dit account heeft geen stockroomtoegang."))
                 return
+            if user.get("totp_secret_enc"):
+                step = security_2fa.verify(security_2fa.decrypt(user["totp_secret_enc"]), form.get("totp", [""])[0], int(user.get("totp_last_step") or -1))
+                if step is None:
+                    self.send_html(401, login_page("Authenticatorcode ontbreekt of is onjuist."))
+                    return
+                with db() as conn:
+                    updated = conn.execute("UPDATE users SET totp_last_step=%s WHERE id=%s AND totp_last_step<%s RETURNING id", (step, user["id"], step)).fetchone()
+                    if not updated:
+                        self.send_html(401, login_page("Authenticatorcode is al gebruikt."))
+                        return
+                    conn.commit()
             token, _ = create_session(str(user["id"]), membership["stockroom_id"])
             self.redirect("/", token=token)
             return
