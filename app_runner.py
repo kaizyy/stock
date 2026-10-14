@@ -8,8 +8,10 @@ import runner
 import dashboard_runner as dashboard
 
 
-def security_page(session, message="", error=""):
+def security_page(session, message="", error="", setup_secret=""):
     feedback = f'<p class="success">{server.html.escape(message)}</p>' if message else (f'<p class="error">{server.html.escape(error)}</p>' if error else "")
+    if setup_secret:
+        feedback += '<p>Voeg deze sleutel toe aan je authenticator: <code>' + server.html.escape(setup_secret) + '</code></p><p class="note">Kies handmatige invoer in je authenticator en bevestig hieronder met de code.</p>'
     return server.auth_page("Accountbeveiliging", f"Ingelogd als {session['email']}", feedback + """
       <form method="post" action="/account/change-email">
         <label>Nieuw e-mailadres<input name="email" type="email" autocomplete="email" required></label>
@@ -139,7 +141,7 @@ class AppHandler(dashboard.DashboardHandler):
                     conn.execute("UPDATE users SET totp_pending_enc=%s WHERE id=%s", (encrypted, session["user_id"]))
                     conn.commit()
                     uri = security_2fa.uri(secret, user["email"])
-                    self.send_html(200, security_page(session, message="Voeg deze sleutel toe aan je authenticator en bevestig daarna met een code.") + '<p>Geheime sleutel (eenmalig): <code>' + server.html.escape(secret) + '</code></p><p>Authenticator URI: <code>' + server.html.escape(uri) + '</code></p>')
+                    self.send_html(200, security_page(session, message="Voeg de sleutel toe aan je authenticator en bevestig daarna met een code.", setup_secret=secret))
                     return
                 if path == "/account/2fa/confirm":
                     if user["totp_secret_enc"] or not user["totp_pending_enc"]:
