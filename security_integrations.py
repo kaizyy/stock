@@ -2,6 +2,7 @@ import base64, hashlib, hmac, html, ipaddress, json, os, secrets, socket, struct
 from datetime import datetime, timezone
 
 import server
+import security_2fa
 
 _installed=False
 
@@ -19,10 +20,11 @@ def _xor(data,key,nonce):
 def encrypt_secret(text):
     key=_key_bytes()
     if not key: raise ValueError('SECURITY_ENCRYPTION_KEY ontbreekt.')
-    nonce=os.urandom(16); ct=_xor(text.encode(),key,nonce); tag=hmac.new(key,nonce+ct,hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(nonce+tag+ct).decode()
+    return 'v2:' + security_2fa.encrypt(text)
 
 def decrypt_secret(token):
+    if token.startswith('v2:'):
+        return security_2fa.decrypt(token[3:])
     key=_key_bytes(); raw=base64.urlsafe_b64decode(token.encode()); nonce,tag,ct=raw[:16],raw[16:48],raw[48:]
     if not key or not hmac.compare_digest(tag,hmac.new(key,nonce+ct,hashlib.sha256).digest()): raise ValueError('2FA-geheim kan niet worden ontsleuteld.')
     return _xor(ct,key,nonce).decode()
