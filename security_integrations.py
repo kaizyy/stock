@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import io
 import qrcode
+from PIL import Image, ImageDraw, ImageFont
 import server
 import security_2fa
 
@@ -79,7 +80,21 @@ def start_totp(session):
     label=urllib.parse.quote(f"Stockroom:{session['email']}")
     issuer=urllib.parse.quote('Stockroom')
     uri=f'otpauth://totp/{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30'
-    qr=qrcode.make(uri)
+    qr=qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_H,box_size=10,border=4)
+    qr.add_data(uri)
+    qr.make(fit=True)
+    qr=qr.make_image(fill_color='black',back_color='white').convert('RGB')
+    size=qr.width
+    logo_size=int(size*0.17)
+    logo=Image.new('RGB',(logo_size,logo_size),'#151515')
+    draw=ImageDraw.Draw(logo)
+    gold='#cba35e'
+    pad=max(2,logo_size//16)
+    draw.ellipse((pad,pad,logo_size-pad-1,logo_size-pad-1),outline=gold,width=max(2,logo_size//22))
+    font=ImageFont.truetype('/usr/share/fonts/TTF/DejaVuSerif.ttf',int(logo_size*0.57))
+    draw.text((logo_size/2,logo_size/2),'V',font=font,fill='#f0dfb9',anchor='mm')
+    pos=((size-logo_size)//2,(size-logo_size)//2)
+    qr.paste(logo,pos)
     output=io.BytesIO()
     qr.save(output,format='PNG')
     encoded=base64.b64encode(output.getvalue()).decode('ascii')
